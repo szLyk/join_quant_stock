@@ -1,6 +1,7 @@
 drop database IF EXISTS stock;
 create database IF NOT EXISTS stock;
 
+use stock;
 DROP TABLE IF EXISTS `stock_history_date_price`;
 CREATE TABLE IF NOT EXISTS `stock_history_date_price` (
   `id` int NOT NULL AUTO_INCREMENT,
@@ -98,3 +99,34 @@ CREATE TABLE IF NOT EXISTS `stock_history_month_price` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `index_stock_date_price` (`stock_code`,`stock_date`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+DROP TABLE IF EXISTS `stock_moving_average_table`;
+CREATE TABLE IF NOT EXISTS `stock_moving_average_table` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(20) DEFAULT NULL,
+  `stock_name` varchar(20) DEFAULT NULL,
+  `stock_date` date DEFAULT NULL,
+  `stock_week_date` date DEFAULT NULL COMMENT 'A股周线交易日',
+  `stock_month_date` date DEFAULT NULL COMMENT 'A股月线交易日',
+  `close_price` decimal(20,4) DEFAULT NULL COMMENT '收盘价',
+  `stock_ma3` decimal(20,4) DEFAULT NULL COMMENT '3日均线',
+  `stock_ma5` decimal(20,4) DEFAULT NULL COMMENT '5日均线',
+  `stock_ma6` decimal(20,4) DEFAULT NULL COMMENT '6日均线',
+  `stock_ma7` decimal(20,4) DEFAULT NULL COMMENT '7日均线',
+  `stock_ma10` decimal(20,4) DEFAULT NULL COMMENT '10日均线',
+  `stock_ma12` decimal(20,4) DEFAULT NULL COMMENT '12日均线',
+  `stock_ma20` decimal(20,4) DEFAULT NULL COMMENT '20日均线',
+  `stock_ma24` decimal(20,4) DEFAULT NULL COMMENT '24日均线',
+  `stock_ma26` decimal(20,4) DEFAULT NULL COMMENT '26日均线',
+  `stock_ma30` decimal(20,4) DEFAULT NULL COMMENT '30日均线',
+  `stock_ma60` decimal(20,4) DEFAULT NULL COMMENT '60日均线',
+  `stock_ma70` decimal(20,4) DEFAULT NULL COMMENT '70日均线',
+  `stock_ma125` decimal(20,4) DEFAULT NULL COMMENT '125日均线',
+  `stock_ma250` decimal(20,4) DEFAULT NULL COMMENT '250日均线',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `un_index_stock_code_and_date` (`stock_code`,`stock_date`) USING BTREE,
+  KEY `index_stock_name` (`stock_name`) USING BTREE,
+  KEY `index_stock_date` (`stock_date`) USING BTREE
+) ENGINE=InnoDB AUTO_INCREMENT=4607278 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
