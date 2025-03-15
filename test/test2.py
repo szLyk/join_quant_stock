@@ -2,6 +2,7 @@ import util.mysql_util as my
 import util.get_stock as gs
 import pandas as pd
 
+from stock_util.stock_indicator_util import calculate_stock_ma
 from util.time_util import get_last_some_time, random_pause, find_last_trading_day_of_month, \
     find_last_trading_day_of_week
 
@@ -139,4 +140,4 @@ def update_stock_week_or_month_date():
 
 
 if __name__ == '__main__':
-    gs.get_some_stock_data('sh.600000','2025-03-13','2025-03-13','d',adjust_flag='3')
+    calculate_stock_ma('m')

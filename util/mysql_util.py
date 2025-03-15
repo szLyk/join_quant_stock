@@ -49,16 +49,30 @@ def insert_or_update(engine, df, table_name, *no_update_columns):
     ON DUPLICATE KEY UPDATE {updates}
     '''
 
-    # 将 DataFrame 转换为字典列表
+    # 将 DataFrame 转换为列表的元组
     data_dicts = df.to_dict('records')
+
     try:
         with engine.connect() as conn:
-            for record in data_dicts:
-                # 使用 bindparams 绑定参数，确保参数按名称绑定
-                stmt = text(sql).bindparams(**record)
-                conn.execute(stmt)
+            # 使用 executemany 方法进行批量插入/更新
+            conn.execute(text(sql), data_dicts)
             conn.commit()
+        print(f"成功插入或更新 {len(df)} 条记录")
         return len(df)
-    except Error as e:
-        print(f"执行更新失败: {e}")
+    except Exception as e:  # 更推荐捕获更具体的异常类型
+        print(f"执行插入或更新失败: {e}")
+        return 0
 
+
+def batch_insert_or_update(engine, df, table_name, *no_update_columns, batch_size=2000):
+    total_records = len(df)
+    processed_records = 0
+
+    for i in range(0, total_records, batch_size):
+        batch_df = df.iloc[i:i + batch_size]
+        processed = insert_or_update(engine, batch_df, table_name, *no_update_columns)
+        processed_records += processed
+
+        print(f"已处理第 {i // batch_size + 1} 批次，共 {min(i + batch_size, total_records)} 条记录")
+
+    return processed_records

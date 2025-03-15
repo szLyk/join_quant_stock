@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS stock.date_stock_moving_average_table (
   `stock_ma5` decimal(20,4) DEFAULT NULL COMMENT '5日均线',
   `stock_ma6` decimal(20,4) DEFAULT NULL COMMENT '6日均线',
   `stock_ma7` decimal(20,4) DEFAULT NULL COMMENT '7日均线',
+  `stock_ma9` decimal(20,4) DEFAULT NULL COMMENT '9日均线',
   `stock_ma10` decimal(20,4) DEFAULT NULL COMMENT '10日均线',
   `stock_ma12` decimal(20,4) DEFAULT NULL COMMENT '12日均线',
   `stock_ma20` decimal(20,4) DEFAULT NULL COMMENT '20日均线',
@@ -157,6 +158,7 @@ CREATE TABLE IF NOT EXISTS stock.week_stock_moving_average_table (
   `stock_ma5` decimal(20,4) DEFAULT NULL COMMENT '5日均线',
   `stock_ma6` decimal(20,4) DEFAULT NULL COMMENT '6日均线',
   `stock_ma7` decimal(20,4) DEFAULT NULL COMMENT '7日均线',
+  `stock_ma9` decimal(20,4) DEFAULT NULL COMMENT '9日均线',
   `stock_ma10` decimal(20,4) DEFAULT NULL COMMENT '10日均线',
   `stock_ma12` decimal(20,4) DEFAULT NULL COMMENT '12日均线',
   `stock_ma20` decimal(20,4) DEFAULT NULL COMMENT '20日均线',
@@ -189,6 +191,7 @@ CREATE TABLE IF NOT EXISTS stock.month_stock_moving_average_table (
   `stock_ma5` decimal(20,4) DEFAULT NULL COMMENT '5日均线',
   `stock_ma6` decimal(20,4) DEFAULT NULL COMMENT '6日均线',
   `stock_ma7` decimal(20,4) DEFAULT NULL COMMENT '7日均线',
+  `stock_ma9` decimal(20,4) DEFAULT NULL COMMENT '9日均线',
   `stock_ma10` decimal(20,4) DEFAULT NULL COMMENT '10日均线',
   `stock_ma12` decimal(20,4) DEFAULT NULL COMMENT '12日均线',
   `stock_ma20` decimal(20,4) DEFAULT NULL COMMENT '20日均线',
@@ -206,4 +209,26 @@ CREATE TABLE IF NOT EXISTS stock.month_stock_moving_average_table (
   KEY `index_stock_name` (`stock_name`) USING BTREE,
   KEY `index_stock_date` (`stock_date`) USING BTREE
 )comment = '股票月线均线表（后复权）',
+ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+
+DROP TABLE IF EXISTS stock.date_stock_macd;
+CREATE TABLE IF NOT EXISTS stock.date_stock_macd (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(20) DEFAULT NULL comment '股票代码',
+  `stock_name` varchar(20) DEFAULT NULL comment '股票名称',
+  `stock_date` date DEFAULT NULL comment '股票交易日',
+  `close_price` decimal(20,4) DEFAULT NULL COMMENT '收盘价',
+  `ema_12` decimal(20,4) DEFAULT NULL COMMENT 'macd中ema12指标',
+  `ema_26` decimal(20,4) DEFAULT NULL COMMENT 'macd中ema26指标',
+  `diff` decimal(20,4) DEFAULT NULL COMMENT '',
+  `dea` decimal(20,4) DEFAULT NULL COMMENT '',
+	`macd` decimal(10,4) DEFAULT NULL COMMENT 'macd',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `un_index_stock_code_and_date` (`stock_code`,`stock_date`) USING BTREE,
+  KEY `index_stock_name` (`stock_name`) USING BTREE,
+  KEY `index_stock_date` (`stock_date`) USING BTREE
+)comment = '股票日线MACD表（后复权）',
 ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

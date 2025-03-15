@@ -1,7 +1,8 @@
 import baostock as bs
 import pandas as pd
 import numpy as np
-from util.mysql_util import insert_or_update, execute_read_query, get_mysql_connection, execute_query
+from util.mysql_util import insert_or_update, execute_read_query, get_mysql_connection, execute_query, \
+    batch_insert_or_update
 from util.time_util import get_last_some_time, random_pause
 
 
@@ -105,7 +106,7 @@ def get_some_stock_data(stock_no, start_date, end_date, frequency, adjust_flag="
 
     # 创建 SQLAlchemy 引擎
     engine = get_mysql_connection()
-    cnt = insert_or_update(engine, df, table_name, 'stock_code', 'stock_date')
+    cnt = batch_insert_or_update(engine, df, table_name, 'stock_code', 'stock_date')
     if cnt > 0:
         return True
     else:
@@ -136,7 +137,7 @@ def get_stock_industry():
     table_name = 'stock_industry'
     # 创建 SQLAlchemy 引擎
     engine = get_mysql_connection()
-    insert_or_update(engine, df, table_name, 'stock_code')
+    batch_insert_or_update(engine, df, table_name, 'stock_code')
 
 
 # 生成upsert语句
@@ -235,7 +236,7 @@ def update_all_stock_history_date_week_month_price(frequency):
 def get_stock_list():
     engine = get_mysql_connection()
     get_stock_list_sql = f'''
-    select stock_code,stock_name,industry,industry_classification from stock.stock_industry;
+    select stock_code,stock_name,industry,industry_classification from stock.stock_industry ;
     '''
     stocks_list = execute_read_query(engine, get_stock_list_sql)
     return pd.DataFrame(stocks_list)
@@ -244,15 +245,15 @@ def get_stock_list():
 def init_update_stock_record():
     stock_list = get_stock_list().drop(columns=['industry', 'industry_classification'])
     engine = get_mysql_connection()
-    insert_or_update(engine, stock_list, 'update_stock_record', 'stock_code')
+    batch_insert_or_update(engine, stock_list, 'update_stock_record', 'stock_code')
 
 
 if __name__ == '__main__':
-    get_stock_industry()
-    init_update_stock_record()
-    update_all_stock_history_date_week_month_price("d")
-    # update_all_stock_history_date_week_month_price("w")
-    # update_all_stock_history_date_week_month_price("m")
+    # get_stock_industry()
+    # init_update_stock_record()
+    # update_all_stock_history_date_week_month_price("d")
+    update_all_stock_history_date_week_month_price("m")
+    # update_all_stock_history_date_week_month_price("m`")
     # update_all_stock_today_price()
 
 

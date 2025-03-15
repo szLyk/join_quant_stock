@@ -12,12 +12,18 @@ import util.file_util as fu
 def calculate_stock_ma(frequency):
     table = 'stock_history_date_price'
     column = 'update_stock_date_ma'
+    moving_table = 'date_stock_moving_average_table'
+    trade_status = 'and tradestatus = 1'
     if frequency == 'm':
         table = 'stock_history_month_price'
         column = 'update_stock_month_ma'
+        moving_table = 'month_stock_moving_average_table'
+        trade_status = ''
     elif frequency == 'w':
         table = 'stock_history_week_price'
         column = 'update_stock_week_ma'
+        moving_table = 'week_stock_moving_average_table'
+        trade_status = ''
 
     get_stock_start_date = f'''
     SELECT a.stock_code,if(a.max_stock_date > b.{column},b.{column},a.max_stock_date) update_date from
@@ -66,7 +72,7 @@ def calculate_stock_ma(frequency):
                                     stock_date,
                                     close_price
                                  from {table} 
-                                 where tradestatus = 1 and stock_date >= DATE_SUB('{update_date}', INTERVAL 12 MONTH)) a
+                                 where stock_date >= DATE_SUB('{update_date}', INTERVAL 12 MONTH) {trade_status}) a
                                          join
                                          (SELECT stock_code,stock_name from update_stock_record where stock_code = '{stock_code}') b 
                                          on a.stock_code = b.stock_code) a 
@@ -101,7 +107,7 @@ def calculate_stock_ma(frequency):
                 ma_df['stock_week_date'] = ma_df['stock_date'].map(find_last_trading_day_of_week)
                 ma_df['stock_month_date'] = ma_df['stock_date'].map(find_last_trading_day_of_month)
                 print(f'计算<{stock_code}>均线...')
-                my.insert_or_update(conn, ma_df, 'date_stock_moving_average_table', 'stock_code', 'stock_date')
+                my.batch_insert_or_update(conn, ma_df, moving_table, 'stock_code', 'stock_date')
 
                 get_max_update_date_sql = f'''
                 select max(stock_date) max_stock_date from {table} where stock_code = '{stock_code}'
@@ -123,58 +129,99 @@ def calculate_stock_ma(frequency):
 
 # 获取要计算的股票的MACD
 def calculate_stock_macd(frequency):
+    batch_size = 5
     engine = my.get_mysql_connection()
-    stocks_list = gs.get_stock_list()
+    select_table = 'stock_history_date_price'
+    insert_table = 'date_stock_macd'
+    update_macd_column = 'update_stock_date_macd'
+    if frequency == 'w':
+        select_table = 'stock_history_week_price'
+        insert_table = 'week_stock_macd'
+        update_macd_column = 'update_stock_week_macd'
+    if frequency == 'm':
+        select_table = 'stock_history_month_price'
+        insert_table = 'month_stock_macd'
+        update_macd_column = 'update_stock_month_macd'
 
-    stock_ma_sql = f'''
-    select stock_code, stock_name, stock_date,close_price,stock_ma9,stock_ma12,stock_ma26
-    from stock.date_stock_moving_average_table
-    where stock_name = '盛和资源' and stock_ma9 is not NULL order by stock_date asc;
-    '''
-    stock_12ma_list = my.execute_read_query(engine, stock_ma_sql)
-    stock_12ma_df = pd.DataFrame(stock_12ma_list)
-    calculate_ema(stock_12ma_df)
+    stock_list = gs.get_stock_list()
+    for i in range(0, len(stock_list), batch_size):
+        batch_df = stock_list.iloc[i:i + batch_size]
+        stock_code = batch_df['stock_code']
+        result_string = ', '.join([f"'{value}'" for value in stock_code])
 
+        stock_date_price_sql = f'''
+        SELECT
+            b.stock_code,
+            a.stock_name,
+            b.stock_date,
+            b.close_price
+        FROM
+            stock.{select_table} b
+            JOIN (SELECT stock_name, stock_code FROM stock.stock_industry
+            where stock_code in ({result_string})) a
+            ON a.stock_code = b.stock_code
+			JOIN (SELECT {update_macd_column},stock_code FROM stock.update_stock_record
+			where stock_code in ({result_string})) c
+            ON c.stock_code = b.stock_code and b.stock_date >= DATE_SUB( c.{update_macd_column},INTERVAL 7 day)
+        '''
+        stock_date_close_price = my.execute_read_query(engine, stock_date_price_sql)
+        stock_df = pd.DataFrame(stock_date_close_price)
+        stock_df['close_price'] = stock_df['close_price'].astype(float)
+        # 初始化平滑因子
+        alpha_12 = 2 / 13
+        alpha_26 = 2 / 27
+        alpha_9 = 2 / 10
 
-def calculate_ema(df):
-    getcontext().prec = 4  # 设置所需的精度
-    column_12 = 'stock_ma12'
-    column_26 = 'stock_ma26'
+        def compute_macd(group):
+            df = group.sort_values(by='stock_date', ascending=True).reset_index(drop=True)
+            first_stock_code = df.loc[0, 'stock_code']
+            first_stock_date = df.loc[0, 'stock_date']
+            get_ema_value = f'''
+            select stock_code,stock_date,ema_12,ema_26,dea,diff,macd
+             from stock.{insert_table} where stock_code = '{first_stock_code}'
+            and stock_date = '{first_stock_date}'
+            '''
+            ma_value = my.execute_read_query(engine, get_ema_value)
+            # 使用SMA初始化EMA
+            if len(ma_value) == 0:
+                df['ema_12'] = df['close_price'].iloc[0]
+                df['ema_26'] = df['close_price'].iloc[0]
+            else:
+                df.loc[0, 'ema_12'] = float(ma_value[0][2])
+                df.loc[0, 'ema_26'] = float(ma_value[0][3])
+                df.loc[0, 'dea'] = float(ma_value[0][4])
+                df.loc[0, 'diff'] = float(ma_value[0][5])
+                df.loc[0, 'macd'] = float(ma_value[0][6])
 
-    # 初始化平滑因子
-    alpha_9 = Decimal('2') / Decimal('10')
-    alpha_12 = Decimal('2') / Decimal('13')  # 使用Decimal进行计算
-    alpha_26 = Decimal('2') / Decimal('27')
+            # 计算EMA12和EMA26
+            for i in range(1, len(df)):
+                df.loc[i, 'ema_12'] = alpha_12 * df.loc[i, 'close_price'] + (1 - alpha_12) * df.loc[i - 1, 'ema_12']
+                df.loc[i, 'ema_26'] = alpha_26 * df.loc[i, 'close_price'] + (1 - alpha_26) * df.loc[i - 1, 'ema_26']
+                df.loc[i, 'diff'] = df.loc[i, 'ema_12'] - df.loc[i, 'ema_26']
+                df.loc[i, 'dea'] = alpha_9 * df.loc[i, 'diff'] + (1 - alpha_9) * df.loc[i - 1, 'dea']
 
-    # 使用SMA初始化EMA
-    df.loc[11, 'ema_12'] = Decimal(str(df.loc[11, column_12]))
-    df.loc[25, 'ema_26'] = Decimal(str(df.loc[25, column_26]))
+            # # 计算DIFF和DEA(MACD线)
+            # df['diff'] = df['ema_12'] - df['ema_26']
+            # df['dea'] = df['diff'].ewm(span=9, adjust=False).mean()  # 使用pandas的ewm方法计算DEA
+            # # alpha_9 * Decimal(df.loc[i, 'diff']) + (Decimal('1') - alpha_9) * Decimal(df.loc[i - 1, 'dea'])
+            df['macd'] = (df['diff'] - df['dea']) * 2  # MACD是DIFF和DEA的差值乘以2
 
-    # 计算EMA12和EMA26
-    for i in range(12, len(df)):
-        if pd.isnull(df.loc[i, 'ema_12']):
-            df.loc[i, 'ema_12'] = alpha_12 * Decimal(str(df.loc[i, 'close_price'])) + (Decimal('1') - alpha_12) * \
-                                  df.loc[i - 1, 'ema_12']
-        if i >= 26:
-            if pd.isnull(df.loc[i, 'ema_26']):
-                df.loc[i, 'ema_26'] = alpha_26 * Decimal(str(df.loc[i, 'close_price'])) + (Decimal('1') - alpha_26) * \
-                                      df.loc[i - 1, 'ema_26']
+            return df
 
-    # 计算DIF
-    df['dif'] = df['ema_12'] - df['ema_26']
+        # 对每个股票的数据进行分组计算MACD，并确保数据按日期排序
+        macd_df = stock_df.groupby('stock_code').apply(compute_macd).reset_index(level=0, drop=True)
 
-    # 初始化EMA9（Signal/DEA）
-    df.loc[25, 'ema_9'] = df.loc[25, 'dif']  # 可以用第26天的DIF值作为初始值
-
-    # 计算EMA9（Signal/DEA）从第26天开始
-    for i in range(26, len(df)):
-        df.loc[i, 'ema_9'] = alpha_9 * df.loc[i, 'dif'] + (Decimal('1') - alpha_9) * df.loc[i - 1, 'ema_9']
-
-    # 计算MACD柱状图
-    df['macd_histogram'] = (df['dif'] - df.loc[:, 'ema_9']) * Decimal('2')
-
-    print(df[['stock_date', 'close_price', 'ema_12', 'ema_26', 'dif', 'ema_9', 'macd_histogram']])
+        cnt = my.batch_insert_or_update(engine, macd_df, insert_table, 'stock_code')
+        # 更新记录
+        if cnt > 0:
+            trade_date_sql = f'''
+            select stock_code,max(stock_date) as {update_macd_column} from stock.{select_table}
+            where stock_code in ({result_string})
+            group by stock_code
+            '''
+            result = my.execute_read_query(engine, trade_date_sql)
+            my.insert_or_update(engine, pd.DataFrame(result), 'update_stock_record', 'stock_code')
 
 
 if __name__ == '__main__':
-    calculate_stock_ma('d')
+    calculate_stock_macd('d')
