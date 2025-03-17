@@ -18,24 +18,43 @@ CREATE TABLE if not EXISTS stock.stock_industry (
 ) comment = '股票行业表',
 ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
-DROP TABLE IF EXISTS stock.update_stock_record;
-CREATE TABLE if not EXISTS stock.update_stock_record (
+DROP TABLE IF EXISTS stock.stock_basic;
+CREATE TABLE if not EXISTS stock.stock_basic (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `update_date` date DEFAULT NULL COMMENT '更新日期',
+  `stock_code` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '证券代码',
+  `stock_name` varchar(20) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '证券名称',
+  `ipo_date` date DEFAULT NULL COMMENT '上市日期',
+  `out_date` date DEFAULT NULL COMMENT '退市日期',
+  `stock_type` tinyint DEFAULT NULL COMMENT '证券类型，其中1：股票，2：指数，3：其它，4：可转债，5：ETF',
+  `stock_status` tinyint DEFAULT NULL COMMENT '上市状态，其中1：上市，0：退市',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `index_stock_code` (`stock_code`) USING BTREE
+) comment = '证券基本资料表',
+ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+drop table if exists stock.update_stock_record;
+CREATE TABLE if not exists stock.update_stock_record (
   `id` int NOT NULL AUTO_INCREMENT,
   `stock_name` varchar(255) DEFAULT NULL COMMENT '股票名称',
   `stock_code` varchar(255) DEFAULT NULL COMMENT '股票代码',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `update_stock_date` date DEFAULT '1990-01-01' COMMENT '日线更新记录',
+  `update_stock_date_macd` date DEFAULT '1990-01-01' COMMENT '日线MACD更新记录',
   `update_stock_week` date DEFAULT '1990-01-01' COMMENT '周线更新记录',
+  `update_stock_week_macd` date DEFAULT '1990-01-01' COMMENT '周线MACD更新记录',
   `update_stock_month` date DEFAULT '1990-01-01' COMMENT '月线更新记录',
+  `update_stock_month_macd` date DEFAULT '1990-01-01' COMMENT '月线MACD更新记录',
   `update_stock_date_ma` date DEFAULT '1990-01-01' COMMENT '日均线更新记录',
   `update_stock_week_ma` date DEFAULT '1990-01-01' COMMENT '周均线更新记录',
   `update_stock_month_ma` date DEFAULT '1990-01-01' COMMENT '月均线更新记录',
   PRIMARY KEY (`id`),
   UNIQUE KEY `u_index_stock_code` (`stock_code`) USING BTREE,
   KEY `index_stock_name` (`stock_name`) USING BTREE
-)  comment = '股票更新记录表',
-ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=87947 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='股票更新记录表';
 
 drop table if exists stock.stock_history_date_price;
 CREATE TABLE if not exists stock.stock_history_date_price (
@@ -274,3 +293,25 @@ CREATE TABLE IF NOT EXISTS stock.month_stock_macd (
   KEY `index_stock_name` (`stock_name`) USING BTREE,
   KEY `index_stock_date` (`stock_date`) USING BTREE
 ) ENGINE=InnoDB AUTO_INCREMENT=16556454 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='股票周线MACD表（后复权）';
+
+
+DROP TABLE IF EXISTS stock.stock_profit_data;
+CREATE TABLE if not EXISTS stock.stock_profit_data (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(10) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_ai_ci DEFAULT NULL COMMENT '证券代码',
+  `publish_date` date DEFAULT NULL COMMENT '公司发布财报的日期',
+  `statistic_date` date DEFAULT NULL COMMENT '财报统计的季度的最后一天, 比如2017-03-31, 2017-06-30',
+  `roe_avg` decimal(20,4) DEFAULT NULL COMMENT '净资产收益率(平均)(%)',
+  `np_margin` decimal(20,4) DEFAULT NULL COMMENT '销售净利率(%)',
+  `gp_margin` decimal(20,4) DEFAULT NULL COMMENT '销售毛利率(%)',
+  `net_profit` decimal(20,4) DEFAULT NULL COMMENT '净利润(元)',
+  `eps_ttm` decimal(20,4) DEFAULT NULL COMMENT '每股收益',
+  `mb_revenue` decimal(20,4) DEFAULT NULL COMMENT '主营营业收入(元)',
+  `total_share` decimal(20,4) DEFAULT NULL COMMENT '总股本	',
+  `liqa_share` decimal(20,4) DEFAULT NULL COMMENT '流通股本',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `index_stock_code` (`stock_code`) USING BTREE
+) comment = '证券季频盈利能力表',
+ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

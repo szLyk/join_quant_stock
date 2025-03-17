@@ -2,8 +2,7 @@ import baostock as bs
 import pandas as pd
 import numpy as np
 import util.mysql_util as my
-from stock_util.stock_indicator_util import calculate_stock_ma
-from util.time_util import get_last_some_time, random_pause
+import util.time_util as tu
 
 
 # 登陆
@@ -120,6 +119,34 @@ def insert_batch_into_stock_price_record(frequency, df):
 
 
 # 获取所有数据的产业数据
+def get_stock_basic():
+    update_date = tu.get_last_some_time(0)
+    get_login()
+    # 获取行业分类数据
+    rs = bs.query_stock_basic()
+    data_list = []
+    while (rs.error_code == '0') & rs.next():
+        # 获取一条记录，将记录合并在一起
+        data_list.append(rs.get_row_data())
+    result = pd.DataFrame(data_list, columns=rs.fields)
+    df = result.rename(columns={
+        'code': 'stock_code',
+        'code_name': 'stock_name',
+        'ipoDate': 'ipo_date',
+        'outDate': 'out_date',
+        'type': 'stock_type',
+        'status': 'stock_status'
+    }).replace(r'^\s*$', None, regex=True)
+    df['update_date'] = update_date
+    get_login_out()
+    # # 使用 to_sql 方法将 DataFrame 写入数据库
+    table_name = 'stock_basic'
+    # 创建 SQLAlchemy 引擎
+    engine = my.get_mysql_connection()
+    my.batch_insert_or_update(engine, df, table_name, 'stock_code')
+
+
+# 获取所有数据的产业数据
 def get_stock_industry():
     get_login()
     # 获取行业分类数据
@@ -157,7 +184,7 @@ def update_table_update_stock_record(stock_name, stock_code, update_column, upda
 def get_stock_list_for_update(update_date):
     select_sql = f'''
     select b.stock_code, b.stock_name, IFNULL(a.{update_date}, '2000-01-01') {update_date}
-    from (SELECT stock_code, stock_name from stock.stock_industry ) b
+    from (SELECT stock_code, stock_name from stock.stock_basic where stock_type = 1 and stock_status = 1 ) b
          left join (SELECT stock_name,stock_code,{update_date} from stock.update_stock_record) a
                    on a.stock_code = b.stock_code;
     '''
@@ -179,7 +206,7 @@ def update_all_stock_today_price(frequency):
     elif frequency == 'm':
         update_column = 'update_stock_month'
     select_sql = get_stock_list_for_update(f'{update_column}')
-    today = get_last_some_time(0)
+    today = tu.get_last_some_time(0)
     result = my.execute_read_query(engine, select_sql)
     result_df = pd.DataFrame(result)
 
@@ -191,21 +218,21 @@ def update_all_stock_today_price(frequency):
             if flag:
                 insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', today)
                 my.execute_query(engine, insert_sql)
-                random_pause(1)
+                tu.random_pause(1)
         elif frequency == 'w':
             df = get_some_stock_data(i[0], today, today, "w")
             flag = insert_batch_into_stock_price_record(frequency, df)
             if flag:
                 insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', today)
                 my.execute_query(engine, insert_sql)
-                random_pause(1)
+                tu.random_pause(1)
         elif frequency == 'm':
             df = get_some_stock_data(i[0], today, today, "m")
             flag = insert_batch_into_stock_price_record(frequency, df)
             if flag:
                 insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', today)
                 my.execute_query(engine, insert_sql)
-                random_pause(1)
+                tu.random_pause(1)
 
 
 # 获取所有数据的历史数据（不包含当天数据）
@@ -216,7 +243,7 @@ def update_all_stock_history_date_week_month_price(frequency):
         select_sql = get_stock_list_for_update('update_stock_week')
     elif frequency == 'm':
         select_sql = get_stock_list_for_update('update_stock_month')
-    last_day = get_last_some_time(1)
+    last_day = tu.get_last_some_time(1)
     result = my.execute_read_query(engine, select_sql)
     df = pd.DataFrame(result)
     for i in df.values:
@@ -228,21 +255,21 @@ def update_all_stock_history_date_week_month_price(frequency):
                 if flag:
                     insert_sql = update_table_update_stock_record(i[1], i[0], 'update_stock_date', last_day)
                     my.execute_query(engine, insert_sql)
-                    random_pause(3)
+                    tu.random_pause(3)
             elif frequency == 'w':
                 df = get_some_stock_data(i[0], i[2], last_day, "w")
                 flag = insert_batch_into_stock_price_record(frequency, df)
                 if flag:
                     insert_sql = update_table_update_stock_record(i[1], i[0], 'update_stock_week', last_day)
                     my.execute_query(engine, insert_sql)
-                    random_pause(2)
+                    tu.random_pause(2)
             elif frequency == 'm':
                 df = get_some_stock_data(i[0], i[2], last_day, "m")
                 flag = insert_batch_into_stock_price_record(frequency, df)
                 if flag:
                     insert_sql = update_table_update_stock_record(i[1], i[0], 'update_stock_month', last_day)
                     my.execute_query(engine, insert_sql)
-                    random_pause(1)
+                    tu.random_pause(1)
         else:
             print(f'<{i[1]}>股票数据已更新...最新数据：{i[2]}')
 
@@ -251,14 +278,14 @@ def update_all_stock_history_date_week_month_price(frequency):
 def get_stock_list():
     engine = my.get_mysql_connection()
     get_stock_list_sql = f'''
-    select stock_code,stock_name,industry,industry_classification from stock.stock_industry ;
+    select stock_code, stock_name from stock.stock_basic where stock_type = 1 and stock_status = 1 ;
     '''
     stocks_list = my.execute_read_query(engine, get_stock_list_sql)
     return pd.DataFrame(stocks_list)
 
 
 def init_update_stock_record():
-    stock_list = get_stock_list().drop(columns=['industry', 'industry_classification'])
+    stock_list = get_stock_list()
     engine = my.get_mysql_connection()
     my.batch_insert_or_update(engine, stock_list, 'update_stock_record', 'stock_code')
 
@@ -292,11 +319,42 @@ def get_stock_price_record_and_macd(stock_code, frequency):
     return pd.DataFrame(result)
 
 
+def init_stock_profit_data():
+    # 登陆系统
+    lg = get_login()
+
+    # 初始化空列表用于存储所有利润数据
+    profit_list = []
+
+    # 查询季频估值指标盈利能力
+    for i in range(1, 5):
+        rs_profit = bs.query_profit_data(code="sh.600000", year=2017, quarter=i)
+        while (rs_profit.error_code == '0') & rs_profit.next():
+            profit_list.append(rs_profit.get_row_data())
+
+    # 将所有利润数据转换为 DataFrame
+    if profit_list:  # 确保有数据时才创建 DataFrame
+        result_profit = pd.DataFrame(profit_list, columns=rs_profit.fields)
+
+        # 初始化 df 为空 DataFrame 或者直接使用 result_profit
+        df = pd.DataFrame(columns=result_profit.columns) if result_profit.empty else result_profit
+
+        # 如果需要进一步合并其他 DataFrame，可以在这里使用 pd.concat()
+        # 示例：df = pd.concat([df, another_df], ignore_index=True)
+
+        print(df)
+    else:
+        print("No data found.")
+
+    # 登出系统
+    get_login_out()
+
+
 if __name__ == '__main__':
     # get_stock_industry()
     # init_update_stock_record()
     # update_all_stock_history_date_week_month_price("d")
     # update_all_stock_history_date_week_month_price("m")
     # update_all_stock_history_date_week_month_price("m`")
-    update_all_stock_today_price('d')
-
+    # update_all_stock_today_price('d')
+    init_stock_profit_data()

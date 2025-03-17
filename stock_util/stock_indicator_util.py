@@ -115,9 +115,13 @@ def calculate_stock_ma(frequency):
                 select max(stock_date) max_stock_date from {table} where stock_code = '{stock_code}'
                 '''
                 max_update = my.execute_read_query(conn, get_max_update_date_sql)
-
+                update_record_column = 'update_stock_date_ma'
+                if frequency == 'w':
+                    update_record_column = 'update_stock_week_ma'
+                if frequency == 'm':
+                    update_record_column = 'update_stock_month_ma'
                 update_sql = f'''
-                update stock.update_stock_record set update_stock_date_ma = '{max_update[0][0]}' where  stock_code = '{stock_code}'
+                update stock.update_stock_record set {update_record_column} = '{max_update[0][0]}' where  stock_code = '{stock_code}'
                 '''
                 print(f'<{stock_code}>均线计算完毕...')
                 my.execute_query(conn, update_sql)
@@ -159,8 +163,8 @@ def calculate_stock_macd(frequency):
             b.close_price
         FROM
             stock.{select_table} b
-            JOIN (SELECT stock_name, stock_code FROM stock.stock_industry
-            where stock_code in ({result_string})) a
+            JOIN (SELECT stock_name, stock_code FROM stock.stock_basic
+            where stock_code in ({result_string}) and stock_type = 1 and stock_status = 1) a
             ON a.stock_code = b.stock_code
 			JOIN (SELECT {update_macd_column},stock_code FROM stock.update_stock_record
 			where stock_code in ({result_string})) c
