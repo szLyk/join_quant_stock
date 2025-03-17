@@ -2,7 +2,7 @@ from mysql.connector import Error
 
 import util.mysql_util as my
 import pandas as pd
-from util.time_util import find_last_trading_day_of_week, find_last_trading_day_of_month, get_last_some_time
+import util.time_util as tu
 import util.get_stock as gs
 import util.file_util as fu
 import numpy as np
@@ -106,8 +106,8 @@ def calculate_stock_ma(frequency):
             ma_result = my.execute_read_query(conn, calculate_sql)
             ma_df = pd.DataFrame(ma_result)
             if len(ma_df) != 0:
-                ma_df['stock_week_date'] = ma_df['stock_date'].map(find_last_trading_day_of_week)
-                ma_df['stock_month_date'] = ma_df['stock_date'].map(find_last_trading_day_of_month)
+                ma_df['stock_week_date'] = ma_df['stock_date'].map(tu.find_last_trading_day_of_week)
+                ma_df['stock_month_date'] = ma_df['stock_date'].map(tu.find_last_trading_day_of_month)
                 print(f'计算<{stock_code}>均线...')
                 my.batch_insert_or_update(conn, ma_df, moving_table, 'stock_code', 'stock_date')
 
@@ -279,14 +279,85 @@ def calculate_stock_month_price():
     df = pd.DataFrame(result)
     if len(df) == 0:
         return
-    df['stock_date'] = df['stock_date'].map(find_last_trading_day_of_month)
+    df['stock_date'] = df['stock_date'].map(tu.find_last_trading_day_of_month)
     placeholders = gs.get_stock_code(df)
 
     cnt = my.batch_insert_or_update(engine, df, 'stock_history_month_price', 'stock_code', 'stock_date')
     if cnt > 0:
-        now_date = get_last_some_time(0)
+        now_date = tu.get_last_some_time(0)
         sql = f'''
         update update_stock_record set update_stock_month = '{now_date}' where stock_code in ({placeholders});
+        '''
+        my.execute_query(engine, sql)
+
+
+# 计算当前未完整周的收、开盘价以及涨跌幅度
+def calculate_stock_week_price():
+    today = tu.get_last_some_time(0)
+    # 获取这周头一天的交易日
+    first_trade_week = tu.find_first_trading_day_of_week(today)
+    last_trade_week = tu.find_last_trading_day_of_week(today)
+    last_week_trade_day = tu.find_last_trading_day_of_week(tu.get_last_some_time(7))
+    calculate_sql = f'''
+        with week_open_price as (
+        SELECT  a.stock_code,a.open_price,a.close_price,
+        c.close_price last_close_price
+        from stock.stock_history_date_price a
+        join (
+        SELECT min(stock_date) stock_date,stock_code
+        from stock.stock_history_date_price
+        where  date_format(stock_date,'%Y-%m-%d') >= '{first_trade_week}'
+        and date_format(stock_date,'%Y-%m-%d') <= '{last_trade_week}'
+        GROUP BY stock_code
+        ) b on a.stock_date = b.stock_date
+        and a.stock_code = b.stock_code
+        join (
+        SELECT close_price,stock_code
+        from stock.stock_history_week_price
+        where date_format(stock_date,'%Y-%m-%d') = '{last_week_trade_day}'
+        ) c on a.stock_code = c.stock_code
+        ),
+        week_close_price as (
+        SELECT a.stock_code,a.close_price,a.stock_date
+        from stock.stock_history_date_price a
+        join (
+        SELECT max(stock_date) stock_date,stock_code
+        from stock.stock_history_date_price
+        where date_format(stock_date,'%Y-%m-%d') >= '{first_trade_week}'
+        and date_format(stock_date,'%Y-%m-%d') <= '{last_trade_week}'
+        GROUP BY stock_code
+        ) b on a.stock_date = b.stock_date
+        and a.stock_code = b.stock_code)
+        select a.stock_code,SUBSTRING_INDEX(a.stock_code,'.',-1) stock_id ,
+            c.stock_date,b.open_price,a.high_price,a.low_price,
+            c.close_price,a.trading_volume,a.trading_amount,
+            3 as adjust_flag,turn,round(((c.close_price - last_close_price)/last_close_price) * 100,4) increase_and_decrease
+        from
+        (SELECT stock_code,sum(trading_volume) trading_volume ,
+        sum(trading_amount)trading_amount,min(low_price)low_price,
+        max(high_price) high_price,sum(turn) turn
+        from stock.stock_history_date_price
+        where date_format(stock_date,'%Y-%m-%d') >= '{first_trade_week}'
+        and date_format(stock_date,'%Y-%m-%d') <= '{last_trade_week}'
+        GROUP BY stock_code) a join
+        week_open_price b on a.stock_code = b.stock_code
+        join
+        week_close_price c on a.stock_code = c.stock_code;
+    '''
+    engine = my.get_mysql_connection()
+    result = my.execute_read_query(engine, calculate_sql)
+    df = pd.DataFrame(result)
+
+    if len(df) == 0:
+        return
+    df['stock_date'] = df['stock_date'].map(tu.find_last_trading_day_of_week)
+    placeholders = gs.get_stock_code(df)
+
+    cnt = my.batch_insert_or_update(engine, df, 'stock_history_week_price', 'stock_code', 'stock_date')
+    if cnt > 0:
+        now_date = tu.get_last_some_time(0)
+        sql = f'''
+        update update_stock_record set update_stock_week = '{now_date}' where stock_code in ({placeholders});
         '''
         my.execute_query(engine, sql)
 
@@ -301,12 +372,38 @@ def detect_macd_divergence(df, price_col='close_price', macd_col='macd',
     if price_col not in df.columns or macd_col not in df.columns:
         raise ValueError("数据必须包含close_price和macd列")
 
+    # ==== 日期预处理 ====
+    # 确保存在stock_date列且为正确日期格式
+    if 'stock_date' not in df.columns:
+        raise ValueError("数据必须包含stock_date列")
+
+    # 转换日期列为datetime类型（处理多种格式）
+    try:
+        df['stock_date'] = pd.to_datetime(
+            df['stock_date'],
+            format='%Y%m%d',  # 处理形如20230719的数值格式
+            errors='coerce'
+        )
+    except:
+        df['stock_date'] = pd.to_datetime(
+            df['stock_date'],
+            format='mixed',  # 处理字符串和datetime混合格式
+            errors='coerce'
+        )
+
+    # 过滤无效日期
+    invalid_dates = df[df['stock_date'].isnull()]
+    if not invalid_dates.empty:
+        print(f"警告：发现{len(invalid_dates)}条无效日期记录，已自动过滤")
+        df = df.dropna(subset=['stock_date'])
+
     df['close_price'] = df['close_price'].astype(float)
     df['macd'] = df['macd'].astype(float)
 
     # 日期索引处理
     try:
-        df = df.set_index(pd.to_datetime(df.index))
+        # 设置日期索引并按时间排序
+        df = df.set_index('stock_date').sort_index()
     except:
         pass  # 已经是日期索引则跳过
 
@@ -379,7 +476,7 @@ if __name__ == '__main__':
         'trend_length': 60  # 2个月趋势观察
     }
 
-    df = gs.get_stock_price_record_and_macd('sh.600343', 'd')
+    df = gs.get_stock_price_record_and_macd('sh.600392', 'd')
     signals = detect_macd_divergence(df, **params)
 
     # 格式化输出
@@ -389,10 +486,10 @@ if __name__ == '__main__':
 
         for idx, row in signals.iterrows():
             print(f"""信号 #{idx + 1}
-发生时间：{row['signal_date'].strftime('%Y-%m-%d')}
-价格变化：{row['price_low1']:.2f} → {row['price_low2']:.2f} (跌幅 {((row['price_low1'] - row['price_low2']) / row['price_low1'] * 100):.1f}%)
-MACD变化：{row['macd_low1']:.3f} → {row['macd_low2']:.3f} (升幅 {((row['macd_low2'] - row['macd_low1']) / abs(row['macd_low1']) * 100 if row['macd_low1'] != 0 else 0):.1f}%)
-趋势强度：过去{params['trend_length']}日累计下跌 {row['trend_strength'] * 100:.1f}%
-{'-' * 60}""")
+    发生时间：{row['signal_date'].strftime('%Y-%m-%d')}
+    价格变化：{row['price_low1']:.2f} → {row['price_low2']:.2f} (跌幅 {((row['price_low1'] - row['price_low2']) / row['price_low1'] * 100):.1f}%)
+    MACD变化：{row['macd_low1']:.3f} → {row['macd_low2']:.3f} (升幅 {((row['macd_low2'] - row['macd_low1']) / abs(row['macd_low1']) * 100 if row['macd_low1'] != 0 else 0):.1f}%)
+    趋势强度：过去{params['trend_length']}日累计下跌 {row['trend_strength'] * 100:.1f}%
+    {'-' * 60}""")
     else:
         print("未检测到符合条件的底背离信号")

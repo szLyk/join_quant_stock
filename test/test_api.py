@@ -2,7 +2,7 @@ import util.mysql_util as my
 import util.get_stock as gs
 import pandas as pd
 
-from stock_util.stock_indicator_util import calculate_stock_ma
+from stock_util.stock_indicator_util import calculate_stock_ma, calculate_stock_month_price, calculate_stock_macd
 from util.time_util import get_last_some_time, random_pause
 
 
@@ -80,4 +80,4 @@ def update_stock_trade_date():
 
 
 if __name__ == '__main__':
-    calculate_stock_ma('w')
+    calculate_stock_ma('m')

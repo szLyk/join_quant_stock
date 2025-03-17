@@ -60,3 +60,39 @@ def find_last_trading_day_of_week(given_date):
         current_day -= pd.Timedelta(days=1)
 
     return current_day.date()
+
+
+def find_first_trading_day_of_week(given_date):
+    """
+    给定一个日期，返回该日期所在周的第一个交易日。
+
+    参数:
+        given_date (str or datetime): 输入的日期。
+
+    返回:
+        date: 该周的第一个交易日。
+    """
+    # 将输入日期转换为datetime对象
+    date = pd.to_datetime(given_date)
+
+    # 创建中国节假日实例
+    cn_holidays = holidays.CountryHoliday('CN', years=[date.year])  # 指定年份以提高效率
+
+    # 计算给定日期所在周的周一
+    monday_of_week = date - pd.offsets.Day(date.weekday())  # weekday()返回0表示周一
+
+    # 向前查找最近的交易日
+    current_day = monday_of_week
+    while current_day.weekday() > 4 or current_day in cn_holidays:  # 如果是周末或节假日
+        current_day += pd.Timedelta(days=1)  # 如果是周末或假日，则跳过这一天
+
+    return current_day.date()
+
+
+if __name__ == '__main__':
+    # 示例调用
+    given_date = '2025-03-17'
+    first_trading_day = find_first_trading_day_of_week(given_date)
+    last_trading_day = find_last_trading_day_of_week(given_date)
+    print("本周的第一个交易日是:", first_trading_day)
+    print("本周的最后个交易日是:", last_trading_day)

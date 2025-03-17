@@ -2,6 +2,7 @@ import baostock as bs
 import pandas as pd
 import numpy as np
 import util.mysql_util as my
+from stock_util.stock_indicator_util import calculate_stock_ma
 from util.time_util import get_last_some_time, random_pause
 
 
@@ -58,7 +59,7 @@ def get_some_stock_data(stock_no, start_date, end_date, frequency, adjust_flag="
         return False
 
     result = pd.DataFrame(data_list, columns=rs.fields)
-    df = None
+
     if frequency == 'w' or frequency == 'm':
         df = result.rename(columns={
             'date': 'stock_date',
@@ -100,6 +101,8 @@ def get_some_stock_data(stock_no, start_date, end_date, frequency, adjust_flag="
 
 
 def insert_batch_into_stock_price_record(frequency, df):
+    if not isinstance(df, pd.DataFrame):
+        return False
     # # 使用 to_sql 方法将 DataFrame 写入数据库
     table_name = 'stock_history_date_price'
     if frequency == 'w':
@@ -296,3 +299,4 @@ if __name__ == '__main__':
     # update_all_stock_history_date_week_month_price("m")
     # update_all_stock_history_date_week_month_price("m`")
     update_all_stock_today_price('d')
+
