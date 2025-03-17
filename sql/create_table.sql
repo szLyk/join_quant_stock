@@ -52,7 +52,7 @@ CREATE TABLE if not exists stock.stock_history_date_price (
   `adjust_flag` tinyint DEFAULT NULL COMMENT '复权状态(1：后复权， 2：前复权，3：不复权）',
   `turn` decimal(20,4) DEFAULT NULL COMMENT '换手率',
   `tradestatus` tinyint DEFAULT NULL COMMENT '交易状态(1：正常交易 0：停牌）',
-  `Increase_and_decrease` decimal(10,4) DEFAULT NULL COMMENT '涨跌幅（百分比）',
+  `increase_and_decrease` decimal(10,4) DEFAULT NULL COMMENT '涨跌幅（百分比）',
   `if_st` tinyint DEFAULT NULL COMMENT '是否ST股，1是，0否',
   `pb_ratio` decimal(20,4) DEFAULT NULL COMMENT '市净率((指定交易日的股票收盘价/指定交易日的每股净资产)=总市值/(最近披露的归属母公司股东的权益-其他权益工具))',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
@@ -79,7 +79,7 @@ CREATE TABLE IF NOT EXISTS stock.stock_history_week_price (
   `trading_amount` decimal(20,4) DEFAULT NULL COMMENT '成交额（单位：人民币元）',
   `adjust_flag` tinyint DEFAULT NULL COMMENT '复权状态(1：后复权， 2：前复权，3：不复权）',
   `turn` decimal(20,4) DEFAULT NULL COMMENT '换手率',
-  `Increase_and_decrease` decimal(10,4) DEFAULT NULL COMMENT '涨跌幅（百分比）',
+  `increase_and_decrease` decimal(10,4) DEFAULT NULL COMMENT '涨跌幅（百分比）',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -102,7 +102,7 @@ CREATE TABLE IF NOT EXISTS stock.stock_history_month_price (
   `trading_amount` decimal(20,4) DEFAULT NULL COMMENT '成交额（单位：人民币元）',
   `adjust_flag` tinyint DEFAULT NULL COMMENT '复权状态(1：后复权， 2：前复权，3：不复权）',
   `turn` decimal(20,4) DEFAULT NULL COMMENT '换手率',
-  `Increase_and_decrease` decimal(10,4) DEFAULT NULL COMMENT '涨跌幅（百分比）',
+  `increase_and_decrease` decimal(10,4) DEFAULT NULL COMMENT '涨跌幅（百分比）',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -232,3 +232,45 @@ CREATE TABLE IF NOT EXISTS stock.date_stock_macd (
   KEY `index_stock_date` (`stock_date`) USING BTREE
 )comment = '股票日线MACD表（后复权）',
 ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+
+DROP TABLE IF EXISTS stock.week_stock_macd;
+CREATE TABLE IF NOT EXISTS stock.week_stock_macd (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(20) DEFAULT NULL COMMENT '股票代码',
+  `stock_name` varchar(20) DEFAULT NULL COMMENT '股票名称',
+  `stock_date` date DEFAULT NULL COMMENT '股票交易日',
+  `close_price` decimal(20,4) DEFAULT NULL COMMENT '收盘价',
+  `ema_12` decimal(20,4) DEFAULT NULL COMMENT 'macd中ema12指标',
+  `ema_26` decimal(20,4) DEFAULT NULL COMMENT 'macd中ema26指标',
+  `diff` decimal(20,4) DEFAULT NULL,
+  `dea` decimal(20,4) DEFAULT NULL,
+  `macd` decimal(10,4) DEFAULT NULL COMMENT 'macd',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `un_index_stock_code_and_date` (`stock_code`,`stock_date`) USING BTREE,
+  KEY `index_stock_name` (`stock_name`) USING BTREE,
+  KEY `index_stock_date` (`stock_date`) USING BTREE
+) ENGINE=InnoDB AUTO_INCREMENT=16556454 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='股票周线MACD表（后复权）';
+
+
+DROP TABLE IF EXISTS stock.month_stock_macd;
+CREATE TABLE IF NOT EXISTS stock.month_stock_macd (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(20) DEFAULT NULL COMMENT '股票代码',
+  `stock_name` varchar(20) DEFAULT NULL COMMENT '股票名称',
+  `stock_date` date DEFAULT NULL COMMENT '股票交易日',
+  `close_price` decimal(20,4) DEFAULT NULL COMMENT '收盘价',
+  `ema_12` decimal(20,4) DEFAULT NULL COMMENT 'macd中ema12指标',
+  `ema_26` decimal(20,4) DEFAULT NULL COMMENT 'macd中ema26指标',
+  `diff` decimal(20,4) DEFAULT NULL,
+  `dea` decimal(20,4) DEFAULT NULL,
+  `macd` decimal(10,4) DEFAULT NULL COMMENT 'macd',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `un_index_stock_code_and_date` (`stock_code`,`stock_date`) USING BTREE,
+  KEY `index_stock_name` (`stock_name`) USING BTREE,
+  KEY `index_stock_date` (`stock_date`) USING BTREE
+) ENGINE=InnoDB AUTO_INCREMENT=16556454 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='股票周线MACD表（后复权）';

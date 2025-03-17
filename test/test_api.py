@@ -74,9 +74,10 @@ def update_stock_trade_date():
     result = my.execute_read_query(engine, sql)
     df = pd.DataFrame(result)
     for i in df.values:
-        gs.get_some_stock_data(i[0], '1990-01-01', '2000-01-04', "d")
+        df = gs.get_some_stock_data(i[0], '1990-01-01', '2000-01-04', "d")
+        gs.insert_batch_into_stock_price_record('d', df)
         random_pause(2)
 
 
 if __name__ == '__main__':
-    calculate_stock_ma('d')
+    calculate_stock_ma('w')

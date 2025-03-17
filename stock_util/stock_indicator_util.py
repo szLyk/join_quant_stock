@@ -2,10 +2,12 @@ from mysql.connector import Error
 
 import util.mysql_util as my
 import pandas as pd
-from util.time_util import find_last_trading_day_of_week, find_last_trading_day_of_month
+from util.time_util import find_last_trading_day_of_week, find_last_trading_day_of_month, get_last_some_time
 import util.get_stock as gs
-from decimal import Decimal, getcontext
 import util.file_util as fu
+import numpy as np
+from scipy.signal import argrelextrema
+import matplotlib.pyplot as plt
 
 
 # 获取要计算的股票数据
@@ -186,6 +188,9 @@ def calculate_stock_macd(frequency):
             if len(ma_value) == 0:
                 df['ema_12'] = df['close_price'].iloc[0]
                 df['ema_26'] = df['close_price'].iloc[0]
+                df.loc[0, 'dea'] = 0
+                df.loc[0, 'diff'] = 0
+                df.loc[0, 'macd'] = 0
             else:
                 df.loc[0, 'ema_12'] = float(ma_value[0][2])
                 df.loc[0, 'ema_26'] = float(ma_value[0][3])
@@ -221,7 +226,173 @@ def calculate_stock_macd(frequency):
             '''
             result = my.execute_read_query(engine, trade_date_sql)
             my.insert_or_update(engine, pd.DataFrame(result), 'update_stock_record', 'stock_code')
+            print(f'<{result_string} macd更新完毕....>')
+
+
+# 计算当前未完整月份的收、开盘价以及涨跌幅度
+def calculate_stock_month_price():
+    calculate_sql = f'''
+    with month_open_price as (
+    SELECT  a.stock_code,a.open_price,a.close_price,
+    c.close_price last_close_price
+    from stock.stock_history_date_price a 
+    join (
+    SELECT min(stock_date) stock_date,stock_code
+    from stock.stock_history_date_price 
+    where date_format(stock_date,'%Y-%m') = date_format(CURRENT_DATE,'%Y-%m')
+    GROUP BY stock_code
+    ) b on a.stock_date = b.stock_date 
+    and a.stock_code = b.stock_code
+    join (
+    SELECT close_price,stock_code
+    from stock.stock_history_month_price 
+    where date_format(stock_date,'%Y-%m') = date_format(DATE_SUB(CURRENT_TIME,INTERVAL 1 month),'%Y-%m')
+    ) c on a.stock_code = c.stock_code
+    ),
+     month_close_price as (
+    SELECT a.stock_code,a.close_price,a.stock_date
+    from stock.stock_history_date_price a 
+    join (
+    SELECT max(stock_date) stock_date,stock_code
+    from stock.stock_history_date_price 
+    where date_format(stock_date,'%Y-%m') = date_format(CURRENT_DATE,'%Y-%m')
+    GROUP BY stock_code
+    ) b on a.stock_date = b.stock_date 
+    and a.stock_code = b.stock_code)
+    select a.stock_code,SUBSTRING_INDEX(a.stock_code,'.',-1) stock_id ,
+        c.stock_date,b.open_price,a.high_price,a.low_price,
+        c.close_price,a.trading_volume,a.trading_amount,
+        3 as adjust_flag,turn,round(((c.close_price - last_close_price)/last_close_price) * 100,4) increase_and_decrease
+    from 
+    (SELECT stock_code,sum(trading_volume) trading_volume ,
+    sum(trading_amount)trading_amount,min(low_price)low_price,
+    max(high_price) high_price,sum(turn) turn
+    from stock.stock_history_date_price 
+    where date_format(stock_date,'%Y-%m') = date_format(CURRENT_DATE,'%Y-%m')
+    GROUP BY stock_code) a join 
+    month_open_price b on a.stock_code = b.stock_code
+    join
+    month_close_price c on a.stock_code = c.stock_code;    
+    '''
+    engine = my.get_mysql_connection()
+    result = my.execute_read_query(engine, calculate_sql)
+    df = pd.DataFrame(result)
+    if len(df) == 0:
+        return
+    df['stock_date'] = df['stock_date'].map(find_last_trading_day_of_month)
+    placeholders = gs.get_stock_code(df)
+
+    cnt = my.batch_insert_or_update(engine, df, 'stock_history_month_price', 'stock_code', 'stock_date')
+    if cnt > 0:
+        now_date = get_last_some_time(0)
+        sql = f'''
+        update update_stock_record set update_stock_month = '{now_date}' where stock_code in ({placeholders});
+        '''
+        my.execute_query(engine, sql)
+
+
+def detect_macd_divergence(df, price_col='close_price', macd_col='macd',
+                           window=20, min_interval=14, trend_length=30):
+    # 数据校验
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("输入必须是 pandas.DataFrame")
+    if df.empty:
+        return pd.DataFrame()
+    if price_col not in df.columns or macd_col not in df.columns:
+        raise ValueError("数据必须包含close_price和macd列")
+
+    df['close_price'] = df['close_price'].astype(float)
+    df['macd'] = df['macd'].astype(float)
+
+    # 日期索引处理
+    try:
+        df = df.set_index(pd.to_datetime(df.index))
+    except:
+        pass  # 已经是日期索引则跳过
+
+    data = df.copy()
+
+    # 改进的极值点识别
+    def find_valid_lows(series, window):
+        lows = []
+        for i in argrelextrema(series.values, np.less, order=window)[0]:
+            if i < window or i > len(series) - window:
+                continue
+            # 要求比前window日最低点低至少1%
+            if series.iloc[i] < series.iloc[i - window:i].min() * 0.99:
+                lows.append(i)
+        return np.array(lows)
+
+    price_lows = find_valid_lows(data[price_col], window)
+    macd_lows = find_valid_lows(data[macd_col], window)
+
+    # 趋势计算
+    data['trend'] = data[price_col].rolling(trend_length).apply(
+        lambda x: (x[0] - x[-1]) / x[0] if x[0] != 0 else 0, raw=True)
+
+    min_interval = max(min_interval, window // 2)  # 动态间隔
+    new_signals = []
+    # 信号检测
+    for i in range(1, len(price_lows)):
+        prev_idx = price_lows[i - 1]
+        curr_idx = price_lows[i]
+
+        # 时间间隔过滤
+        if (curr_idx - prev_idx) < min_interval:
+            continue
+
+        # 价格条件
+        if data[price_col].iloc[curr_idx] >= data[price_col].iloc[prev_idx]:
+            continue
+
+        # MACD过滤
+        macd_mask = (macd_lows >= prev_idx) & (macd_lows <= curr_idx)
+        if not macd_mask.any():
+            continue
+        macd_low_idx = macd_lows[macd_mask][-1]
+
+        if data[macd_col].iloc[macd_low_idx] <= data[macd_col].iloc[prev_idx]:
+            continue
+
+        # 趋势确认
+        if data['trend'].iloc[curr_idx] < 0.08:  # 下跌不足8%不视为有效趋势
+            continue
+
+        # 收集信号到列表
+        new_signals.append({
+            'signal_date': data.index[curr_idx],
+            'price_low1': data[price_col].iloc[prev_idx],
+            'price_low2': data[price_col].iloc[curr_idx],
+            'macd_low1': data[macd_col].iloc[prev_idx],
+            'macd_low2': data[macd_col].iloc[macd_low_idx],
+            'trend_strength': data['trend'].iloc[curr_idx]
+        })
+
+    return pd.DataFrame(new_signals)
 
 
 if __name__ == '__main__':
-    calculate_stock_macd('d')
+    # 参数配置
+    params = {
+        'window': 30,  # 增大窗口减少噪声
+        'min_interval': 21,  # 约1个月间隔
+        'trend_length': 60  # 2个月趋势观察
+    }
+
+    df = gs.get_stock_price_record_and_macd('sh.600343', 'd')
+    signals = detect_macd_divergence(df, **params)
+
+    # 格式化输出
+    if not signals.empty:
+        print(f"发现 {len(signals)} 个有效底背离信号（参数：{params}）")
+        print("=" * 60)
+
+        for idx, row in signals.iterrows():
+            print(f"""信号 #{idx + 1}
+发生时间：{row['signal_date'].strftime('%Y-%m-%d')}
+价格变化：{row['price_low1']:.2f} → {row['price_low2']:.2f} (跌幅 {((row['price_low1'] - row['price_low2']) / row['price_low1'] * 100):.1f}%)
+MACD变化：{row['macd_low1']:.3f} → {row['macd_low2']:.3f} (升幅 {((row['macd_low2'] - row['macd_low1']) / abs(row['macd_low1']) * 100 if row['macd_low1'] != 0 else 0):.1f}%)
+趋势强度：过去{params['trend_length']}日累计下跌 {row['trend_strength'] * 100:.1f}%
+{'-' * 60}""")
+    else:
+        print("未检测到符合条件的底背离信号")
