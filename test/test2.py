@@ -140,4 +140,5 @@ def update_stock_week_or_month_date():
 
 
 if __name__ == '__main__':
-    calculate_stock_ma('w')
+    calculate_stock_ma('d')
+
