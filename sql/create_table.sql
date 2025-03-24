@@ -315,3 +315,22 @@ CREATE TABLE if not EXISTS stock.stock_profit_data (
   UNIQUE KEY `index_stock_code` (`stock_code`) USING BTREE
 ) comment = '证券季频盈利能力表',
 ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+
+drop table if exists stock.stock_date_boll;
+CREATE TABLE if not exists stock.stock_date_boll (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(20) NOT NULL COMMENT '证券代码',
+  `stock_name` varchar(20) NOT NULL COMMENT '股票名称',
+  `stock_date` date NOT NULL COMMENT '交易所行情日期',
+  `boll_twenty` decimal(10,4) DEFAULT NULL COMMENT '布林线中轨',
+  `upper_rail` decimal(10,4) DEFAULT NULL COMMENT '布林线上轨',
+  `lower_rail` decimal(10,4) DEFAULT NULL COMMENT '布林线下轨',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `index_stock_date_price` (`stock_code`,`stock_date`) USING BTREE,
+  KEY `index_stock_name` (`stock_name`) USING BTREE,
+  KEY `index_stock_date` (`stock_date`) USING BTREE
+)comment = '计算股票每日的布林线',
+ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;

@@ -38,7 +38,8 @@ def calculate_stock_ma(frequency):
     from
     (SELECT a.stock_code,if(a.max_stock_date > b.{column},b.{column},a.max_stock_date) update_date,min_stock_date from
     (SELECT a.stock_code,max(a.stock_date) max_stock_date,min(a.stock_date) min_stock_date from stock.{table} a GROUP BY a.stock_code) a
-    join (SELECT b.stock_code,b.{column} from stock.update_stock_record b) b on a.stock_code = b.stock_code) a ;
+    join (SELECT b.stock_code,b.{column} from stock.update_stock_record b) b on a.stock_code = b.stock_code
+    join (select * from stock.stock_basic where stock_type = 1 and stock_status = 1) c on c.stock_code = a.stock_code) a;
    '''
 
     conn = my.get_mysql_connection()
