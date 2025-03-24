@@ -18,6 +18,7 @@ def update_stock_ma():
     df = pd.DataFrame(stock_list)
     engine = my.get_mysql_connection()
     for record in df.values:
+        print(f'<{record[0]}> 开始计算....')
         select_sql = f'''
         -- 插入或更新 target_table 表
         INSERT INTO stock.date_stock_moving_average_table (stock_code, stock_name, stock_date, close_price, stock_ma3, stock_ma5, stock_ma6, stock_ma7, stock_ma9, stock_ma10, stock_ma12, stock_ma20, stock_ma24, stock_ma26, stock_ma30, stock_ma60, stock_ma70, stock_ma125, stock_ma250)
@@ -140,5 +141,5 @@ def update_stock_week_or_month_date():
 
 
 if __name__ == '__main__':
-    calculate_stock_ma('d')
+    calculate_stock_ma('w')
 

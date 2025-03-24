@@ -1,3 +1,5 @@
+import math
+
 from mysql.connector import Error
 
 import util.mysql_util as my
@@ -16,21 +18,27 @@ def calculate_stock_ma(frequency):
     column = 'update_stock_date_ma'
     moving_table = 'date_stock_moving_average_table'
     trade_status = 'and tradestatus = 1'
+    sub_month = 24
+
     if frequency == 'm':
         table = 'stock_history_month_price'
         column = 'update_stock_month_ma'
         moving_table = 'month_stock_moving_average_table'
         trade_status = ''
+        sub_month = 360
     elif frequency == 'w':
         table = 'stock_history_week_price'
         column = 'update_stock_week_ma'
         moving_table = 'week_stock_moving_average_table'
         trade_status = ''
-
+        sub_month = 120
     get_stock_start_date = f'''
-    SELECT a.stock_code,if(a.max_stock_date > b.{column},b.{column},a.max_stock_date) update_date from
-    (SELECT a.stock_code,max(a.stock_date) max_stock_date from stock.{table} a GROUP BY a.stock_code) a
-    join (SELECT b.stock_code,b.{column} from stock.update_stock_record b) b on a.stock_code = b.stock_code;
+    select stock_code, update_date, min_stock_date,
+        if(datediff(update_date,min_stock_date)>365*5,1,0) sub_date_diff
+    from
+    (SELECT a.stock_code,if(a.max_stock_date > b.{column},b.{column},a.max_stock_date) update_date,min_stock_date from
+    (SELECT a.stock_code,max(a.stock_date) max_stock_date,min(a.stock_date) min_stock_date from stock.{table} a GROUP BY a.stock_code) a
+    join (SELECT b.stock_code,b.{column} from stock.update_stock_record b) b on a.stock_code = b.stock_code) a ;
    '''
 
     conn = my.get_mysql_connection()
@@ -41,6 +49,16 @@ def calculate_stock_ma(frequency):
         for record in stock_start_date_df.values:
             stock_code = record[0]
             update_date = record[1]
+            sub_date_diff = record[3]
+            if frequency == 'd' and sub_date_diff == 1:
+                conditions_one = f"where stock_date >= DATE_SUB('{update_date}', INTERVAL {sub_month} MONTH) {trade_status}"
+                conditions_two = f"where stock_ma250 is not null"
+            elif frequency == 'w' and sub_date_diff == 1:
+                conditions_one = f"where stock_date >= DATE_SUB('{update_date}', INTERVAL {sub_month} MONTH) {trade_status} "
+                conditions_two = f"where stock_ma250 is not null"
+            elif sub_date_diff == 0 or frequency == 'm':
+                conditions_one = ''
+                conditions_two = ''
             calculate_sql = f'''
                     WITH RankedPrices AS (
                     SELECT 
@@ -74,12 +92,18 @@ def calculate_stock_ma(frequency):
                                     stock_date,
                                     close_price
                                  from {table} 
-                                 where stock_date >= DATE_SUB('{update_date}', INTERVAL 12 MONTH) {trade_status}) a
+                                 {conditions_one}
+                                 ) a
                                          join
                                          (SELECT stock_code,stock_name from update_stock_record where stock_code = '{stock_code}') b 
                                          on a.stock_code = b.stock_code) a 
                         )
-                    SELECT 
+                        select stock_code, stock_name, stock_date, close_price, stock_ma3, stock_ma5, stock_ma6, stock_ma7, 
+                               stock_ma9, stock_ma10, stock_ma12, stock_ma20, stock_ma24, stock_ma26, stock_ma30, stock_ma60, 
+                               stock_ma70, stock_ma125, stock_ma250 
+                           from
+                        (
+                            SELECT
                             stock_code,
                             stock_name,
                             stock_date,
@@ -99,10 +123,10 @@ def calculate_stock_ma(frequency):
                             CASE WHEN count_70d >= 70 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 69 PRECEDING AND CURRENT ROW) END AS stock_ma70,
                             CASE WHEN count_125d >= 125 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 124 PRECEDING AND CURRENT ROW) END AS stock_ma125,
                             CASE WHEN count_250d >= 250 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 249 PRECEDING AND CURRENT ROW) END AS stock_ma250
-                    FROM 
-                        RankedPrices;
+                    FROM
+                        RankedPrices) a 
+                        {conditions_two};
             '''
-
             ma_result = my.execute_read_query(conn, calculate_sql)
             ma_df = pd.DataFrame(ma_result)
             if len(ma_df) != 0:
@@ -149,7 +173,7 @@ def calculate_stock_macd(frequency):
         insert_table = 'month_stock_macd'
         update_macd_column = 'update_stock_month_macd'
 
-    stock_list = gs.get_stock_list()
+    stock_list = gs.get_stock_list_for_update_df()
     for i in range(0, len(stock_list), batch_size):
         batch_df = stock_list.iloc[i:i + batch_size]
         stock_code = batch_df['stock_code']
@@ -472,28 +496,90 @@ def detect_macd_divergence(df, price_col='close_price', macd_col='macd',
     return pd.DataFrame(new_signals)
 
 
+def calculate_today_stock_boll():
+    # 获取数据库连接
+    engine = my.get_mysql_connection()
+    stock_list = gs.get_stock_list_for_update_df()
+    update_table = 'stock_date_boll'
+    for record in stock_list.values:
+        stock_code = record[0]
+        stock_name = record[1]
+        data_list = []
+        columns = ['stock_code', 'stock_name', 'stock_date', 'boll_twenty', 'upper_rail', 'lower_rail']
+        try:
+            # 使用参数化查询防止 SQL 注入
+            sql = f'''
+            select a.stock_code,b.stock_name,a.stock_date,a.close_price,b.stock_ma20,rn from
+            (SELECT * from
+            (SELECT *,ROW_NUMBER() OVER (PARTITION BY stock_code ORDER BY stock_date desc) rn
+            from stock_history_date_price where stock_code = (
+            select stock_code from stock.stock_basic where stock_code = '{stock_code}'
+            ) and tradestatus = 1)a) a
+            join date_stock_moving_average_table b on
+            a.stock_code = b.stock_code
+            and a.stock_date = b.stock_date;
+            '''
+            result = my.execute_read_query(engine, sql)
+            # 将结果转换为 DataFrame
+            df = pd.DataFrame(result)
+            length = len(df)
+            print(f'开始计算<{stock_name}>布林线...')
+            for index in range(length - 19):
+                window = df.iloc[index:index + 20]
+
+                # 检查是否有数据
+                if window.empty:
+                    raise ValueError(f"No data found for stock code: {stock_code}")
+
+                # 确保列名正确
+                required_columns = {'stock_ma20', 'stock_date'}
+                if not required_columns.issubset(window.columns):
+                    raise ValueError("The query result is missing required columns.")
+
+                # 获取 MA20 和其他基本信息
+                stock_ma20 = window['stock_ma20'].astype(float).iloc[0]  # 获取第一个值
+                max_date = window['stock_date'].max()  # 最大日期
+
+                # 计算标准差
+                standard_deviation = np.std(window['close_price'].astype(float), ddof=1)
+
+                # 计算布林带上轨和下轨
+                upper_rail = stock_ma20 + 2 * standard_deviation
+                lower_rail = stock_ma20 - 2 * standard_deviation
+                result_list = [stock_code, stock_name, max_date,stock_ma20, upper_rail, lower_rail]
+                data_list.append(result_list)
+            data_df = pd.DataFrame(data_list, columns=columns)
+            data_df = data_df.replace({np.nan: None})
+            if len(data_df) > 0:
+                my.batch_insert_or_update(engine, data_df, update_table, 'stock_code', 'stock_date')
+                print(f'计算<{stock_name}> 布林线成功！')
+        except Exception as e:
+            raise e
+
+
 if __name__ == '__main__':
-    # 参数配置
-    params = {
-        'window': 30,  # 增大窗口减少噪声
-        'min_interval': 21,  # 约1个月间隔
-        'trend_length': 60  # 2个月趋势观察
-    }
-
-    df = gs.get_stock_price_record_and_macd('sh.600392', 'd')
-    signals = detect_macd_divergence(df, **params)
-
-    # 格式化输出
-    if not signals.empty:
-        print(f"发现 {len(signals)} 个有效底背离信号（参数：{params}）")
-        print("=" * 60)
-
-        for idx, row in signals.iterrows():
-            print(f"""信号 #{idx + 1}
-    发生时间：{row['signal_date'].strftime('%Y-%m-%d')}
-    价格变化：{row['price_low1']:.2f} → {row['price_low2']:.2f} (跌幅 {((row['price_low1'] - row['price_low2']) / row['price_low1'] * 100):.1f}%)
-    MACD变化：{row['macd_low1']:.3f} → {row['macd_low2']:.3f} (升幅 {((row['macd_low2'] - row['macd_low1']) / abs(row['macd_low1']) * 100 if row['macd_low1'] != 0 else 0):.1f}%)
-    趋势强度：过去{params['trend_length']}日累计下跌 {row['trend_strength'] * 100:.1f}%
-    {'-' * 60}""")
-    else:
-        print("未检测到符合条件的底背离信号")
+    # # 参数配置
+    # params = {
+    #     'window': 30,  # 增大窗口减少噪声
+    #     'min_interval': 21,  # 约1个月间隔
+    #     'trend_length': 60  # 2个月趋势观察
+    # }
+    #
+    # df = gs.get_stock_price_record_and_macd('sh.600392', 'd')
+    # signals = detect_macd_divergence(df, **params)
+    #
+    # # 格式化输出
+    # if not signals.empty:
+    #     print(f"发现 {len(signals)} 个有效底背离信号（参数：{params}）")
+    #     print("=" * 60)
+    #
+    #     for idx, row in signals.iterrows():
+    #         print(f"""信号 #{idx + 1}
+    # 发生时间：{row['signal_date'].strftime('%Y-%m-%d')}
+    # 价格变化：{row['price_low1']:.2f} → {row['price_low2']:.2f} (跌幅 {((row['price_low1'] - row['price_low2']) / row['price_low1'] * 100):.1f}%)
+    # MACD变化：{row['macd_low1']:.3f} → {row['macd_low2']:.3f} (升幅 {((row['macd_low2'] - row['macd_low1']) / abs(row['macd_low1']) * 100 if row['macd_low1'] != 0 else 0):.1f}%)
+    # 趋势强度：过去{params['trend_length']}日累计下跌 {row['trend_strength'] * 100:.1f}%
+    # {'-' * 60}""")
+    # else:
+    #     print("未检测到符合条件的底背离信号")
+    calculate_today_stock_boll()

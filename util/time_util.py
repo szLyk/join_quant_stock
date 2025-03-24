@@ -3,6 +3,7 @@ import random
 import time
 import holidays
 import pandas as pd
+import pytz
 
 
 def get_last_some_time(day):
@@ -87,6 +88,38 @@ def find_first_trading_day_of_week(given_date):
         current_day += pd.Timedelta(days=1)  # 如果是周末或假日，则跳过这一天
 
     return current_day.date()
+
+
+def turn_date_to_timestamp(date_str):
+    # 定义日期字符串的格式
+    date_format = '%Y-%m-%d'
+    # 将日期字符串转换为datetime对象
+    dt_obj = datetime.strptime(date_str, date_format)
+    # 将datetime对象转换为时间戳（秒）
+    return dt_obj.timestamp()
+
+
+def turn_time_to_timestamp(date_str):
+    # 定义日期字符串的格式
+    date_format = '%Y-%m-%d %H:%M:%S'
+    # 将日期字符串转换为datetime对象
+    dt_obj = datetime.strptime(date_str, date_format)
+    # 将datetime对象转换为时间戳（秒）
+    return dt_obj.timestamp()
+
+
+def turn_timestamp_to_date(timestamp, formatted):
+    # 转换为UTC时间
+    utc_time = datetime.utcfromtimestamp(timestamp)
+    # 定义目标时区
+    target_timezone = pytz.timezone('Asia/Shanghai')
+    # 转换为指定时区的时间
+    target_time = utc_time.replace(tzinfo=pytz.utc).astimezone(target_timezone)
+    format_time = '%Y-%m-%d %H:%M:%S %Z'
+    if formatted == 'd':
+        return target_time.strftime("%Y-%m-%d")
+    # 格式化时间
+    return target_time.strftime(format_time)
 
 
 if __name__ == '__main__':

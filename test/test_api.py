@@ -81,9 +81,14 @@ def update_stock_trade_date():
 
 
 if __name__ == '__main__':
-    # gs.update_all_stock_today_price('d')
+    # gs.update_all_stock_history_date_week_month_price('w')
+    # calculate_stock_ma('d')
+    # calculate_stock_macd('d')
     # calculate_stock_week_price()
     # calculate_stock_month_price()
-    # calculate_stock_ma('m')
-    calculate_stock_ma('w')
+    # calculate_stock_ma('w')
+    # calculate_stock_macd('w')
+    # calculate_stock_macd('m')
+    gs.update_all_stock_today_price('d')
+
 

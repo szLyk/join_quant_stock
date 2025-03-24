@@ -6,3 +6,13 @@ mysql:
   password: 123456
   driver: com.mysql.cj.jdbc.Driver
   database: stock
+
+redis:
+  host: 192.168.1.109
+  port: 6379
+  username: root
+  password: 123456
+
+proxy_pool:
+  ip: 192.168.1.109
+  port: 5010
