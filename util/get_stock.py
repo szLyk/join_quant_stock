@@ -185,7 +185,7 @@ def update_table_update_stock_record(stock_name, stock_code, update_column, upda
 def get_stock_list_for_update_sql(update_date_column=None):
     if update_date_column is not None:
         select_sql = f'''
-        select b.stock_code, b.stock_name, IFNULL(a.{update_date_column}, '2000-01-01') {update_date_column}
+        select b.stock_code, b.stock_name, IFNULL(a.{update_date_column}, '1990-01-01') {update_date_column}
         from (SELECT stock_code, stock_name from stock.stock_basic where stock_type = 1 and stock_status = 1) b
              left join (SELECT stock_name,stock_code,{update_date_column} from stock.update_stock_record) a
                        on a.stock_code = b.stock_code;
@@ -435,6 +435,20 @@ def remove_redis_update_stock_code(frequency, stock_code):
     return rs.delete_sortSet_by_member(f'{today}_{column}', stock_code)
 
 
+# 计算股票交易日对应的周月日期
+def init_stock_date_week_month():
+    engine = my.get_mysql_connection()
+    sql = f'''
+    select stock_date from stock_history_date_price group by stock_date;
+    '''
+    result = my.execute_read_query(engine, sql)
+    df = pd.DataFrame(result)
+    df['stock_week_date'] = df['stock_date'].map(tu.find_last_trading_day_of_week)
+    df['stock_month_date'] = df['stock_date'].map(tu.find_last_trading_day_of_month)
+    if len(df) > 0:
+        my.batch_insert_or_update(engine, df, 'stock_date_week_month','stock_date')
+
+
 if __name__ == '__main__':
     # get_stock_industry()
     # init_update_stock_record()
@@ -442,8 +456,7 @@ if __name__ == '__main__':
     # update_all_stock_history_date_week_month_price("m")
     # update_all_stock_history_date_week_month_price("m`")
     # update_all_stock_today_price('d')
-    init_stock_profit_data(2025)
+    init_stock_date_week_month()
     # print(get_some_stock_data("sz.003008", "2025-03-19", "2025-03-19", "d"))
     # print(get_redis_update_stock_list('d', ''))
     # print(remove_redis_update_stock_code('d', 'sh.600000'))
-

@@ -1,3 +1,4 @@
+import datetime
 import math
 
 from mysql.connector import Error
@@ -13,7 +14,7 @@ import matplotlib.pyplot as plt
 
 
 # 获取要计算的股票数据
-def calculate_stock_ma(frequency):
+def calculate_stock_ma(frequency, if_init=False, batch_size=20):
     table = 'stock_history_date_price'
     column = 'update_stock_date_ma'
     moving_table = 'date_stock_moving_average_table'
@@ -32,6 +33,7 @@ def calculate_stock_ma(frequency):
         moving_table = 'week_stock_moving_average_table'
         trade_status = ''
         sub_month = 120
+
     get_stock_start_date = f'''
     select stock_code, update_date, min_stock_date,
         if(datediff(update_date,min_stock_date)>365*5,1,0) sub_date_diff
@@ -44,46 +46,35 @@ def calculate_stock_ma(frequency):
 
     conn = my.get_mysql_connection()
     stock_start_date_result = my.execute_read_query(conn, get_stock_start_date)
-    stock_start_date_df = pd.DataFrame(stock_start_date_result)
+    stock_start_date_df = pd.DataFrame(stock_start_date_result,
+                                       columns=['stock_code', 'update_date', 'min_stock_date', 'sub_date_diff'])
 
     try:
-        for record in stock_start_date_df.values:
-            stock_code = record[0]
-            update_date = record[1]
-            sub_date_diff = record[3]
-            if frequency == 'd' and sub_date_diff == 1:
-                conditions_one = f"where stock_date >= DATE_SUB('{update_date}', INTERVAL {sub_month} MONTH) {trade_status}"
-                conditions_two = f"where stock_ma250 is not null"
-            elif frequency == 'w' and sub_date_diff == 1:
-                conditions_one = f"where stock_date >= DATE_SUB('{update_date}', INTERVAL {sub_month} MONTH) {trade_status} "
-                conditions_two = f"where stock_ma250 is not null"
-            elif sub_date_diff == 0 or frequency == 'm':
-                conditions_one = ''
-                conditions_two = ''
+        for i in range(0, len(stock_start_date_df), batch_size):
+            batch_df = stock_start_date_df.iloc[i:i + batch_size]
+
+            # 构建条件字符串
+            conditions_one_list = []
+            for record in batch_df.values:
+                stock_code = record[0]
+                update_date = record[1]
+                sub_date_diff = record[3]
+                if frequency == 'd' and sub_date_diff == 1:
+                    conditions_one = f"(stock_code = '{stock_code}' and stock_date >= DATE_SUB('{update_date}'," \
+                                     f" INTERVAL {sub_month} MONTH) {trade_status})"
+                elif frequency == 'w' and sub_date_diff == 1:
+                    conditions_one = f"(stock_code = '{stock_code}' and stock_date >= DATE_SUB('{update_date}', " \
+                                     f"INTERVAL {sub_month} MONTH) {trade_status})"
+                elif sub_date_diff == 0 or frequency == 'm':
+                    conditions_one = f"(stock_code = '{stock_code}')"
+                conditions_one_list.append(conditions_one)
+
+            conditions_one_str = " or ".join(conditions_one_list)
+            conditions_one_str = "where" + conditions_one_str
+            if if_init:
+                conditions_one_str = ""
             calculate_sql = f'''
-                    WITH RankedPrices AS (
-                    SELECT 
-                        stock_code,
-                        stock_name,
-                        stock_date,
-                        close_price,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) as count_3d,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) as count_5d,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 5 PRECEDING AND CURRENT ROW) as count_6d,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) as count_7d,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 8 PRECEDING AND CURRENT ROW) as count_9d,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 9 PRECEDING AND CURRENT ROW) as count_10d,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 11 PRECEDING AND CURRENT ROW) as count_12d,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) as count_20d,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 23 PRECEDING AND CURRENT ROW) as count_24d,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 25 PRECEDING AND CURRENT ROW) as count_26d,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 29 PRECEDING AND CURRENT ROW) as count_30d,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 59 PRECEDING AND CURRENT ROW) as count_60d,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 69 PRECEDING AND CURRENT ROW) as count_70d,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 124 PRECEDING AND CURRENT ROW) as count_125d,
-                        COUNT(*) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 249 PRECEDING AND CURRENT ROW) as count_250d
-                    FROM 
-                        (SELECT a.stock_code,
+                            SELECT a.stock_code,
                                 stock_name, 
                                 stock_date,
                                 close_price
@@ -93,67 +84,61 @@ def calculate_stock_ma(frequency):
                                     stock_date,
                                     close_price
                                  from {table} 
-                                 {conditions_one}
+                                 {conditions_one_str}
                                  ) a
                                          join
-                                         (SELECT stock_code,stock_name from update_stock_record where stock_code = '{stock_code}') b 
-                                         on a.stock_code = b.stock_code) a 
-                        )
-                        select stock_code, stock_name, stock_date, close_price, stock_ma3, stock_ma5, stock_ma6, stock_ma7, 
-                               stock_ma9, stock_ma10, stock_ma12, stock_ma20, stock_ma24, stock_ma26, stock_ma30, stock_ma60, 
-                               stock_ma70, stock_ma125, stock_ma250 
-                           from
-                        (
-                            SELECT
-                            stock_code,
-                            stock_name,
-                            stock_date,
-                            close_price,
-                            CASE WHEN count_3d >= 3 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 2 PRECEDING AND CURRENT ROW) END AS stock_ma3,
-                            CASE WHEN count_5d >= 5 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) END AS stock_ma5,
-                            CASE WHEN count_6d >= 6 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 5 PRECEDING AND CURRENT ROW) END AS stock_ma6,
-                            CASE WHEN count_7d >= 7 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 6 PRECEDING AND CURRENT ROW) END AS stock_ma7,
-                            CASE WHEN count_9d >= 9 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 8 PRECEDING AND CURRENT ROW) END AS stock_ma9,
-                            CASE WHEN count_10d >= 10 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 9 PRECEDING AND CURRENT ROW) END AS stock_ma10,
-                            CASE WHEN count_12d >= 12 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 11 PRECEDING AND CURRENT ROW) END AS stock_ma12,
-                            CASE WHEN count_20d >= 20 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 19 PRECEDING AND CURRENT ROW) END AS stock_ma20,
-                            CASE WHEN count_24d >= 24 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 23 PRECEDING AND CURRENT ROW) END AS stock_ma24,
-                            CASE WHEN count_26d >= 26 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 25 PRECEDING AND CURRENT ROW) END AS stock_ma26,
-                            CASE WHEN count_30d >= 30 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 29 PRECEDING AND CURRENT ROW) END AS stock_ma30,
-                            CASE WHEN count_60d >= 60 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 59 PRECEDING AND CURRENT ROW) END AS stock_ma60,
-                            CASE WHEN count_70d >= 70 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 69 PRECEDING AND CURRENT ROW) END AS stock_ma70,
-                            CASE WHEN count_125d >= 125 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 124 PRECEDING AND CURRENT ROW) END AS stock_ma125,
-                            CASE WHEN count_250d >= 250 THEN AVG(close_price) OVER (PARTITION BY stock_code ORDER BY stock_date ROWS BETWEEN 249 PRECEDING AND CURRENT ROW) END AS stock_ma250
-                    FROM
-                        RankedPrices) a 
-                        {conditions_two};
-            '''
-            ma_result = my.execute_read_query(conn, calculate_sql)
-            ma_df = pd.DataFrame(ma_result)
-            if len(ma_df) != 0:
-                ma_df['stock_week_date'] = ma_df['stock_date'].map(tu.find_last_trading_day_of_week)
-                ma_df['stock_month_date'] = ma_df['stock_date'].map(tu.find_last_trading_day_of_month)
-                print(f'计算<{stock_code}>均线...')
-                my.batch_insert_or_update(conn, ma_df, moving_table, 'stock_code', 'stock_date')
+                                         (SELECT stock_code,stock_name from update_stock_record where stock_code in 
+                                         ({", ".join([f"'{code}'" for code in batch_df['stock_code']])})) b 
+                                         on a.stock_code = b.stock_code
+                        '''
+            result = my.execute_read_query(conn, calculate_sql)
+            df = pd.DataFrame(result, columns=['stock_code', 'stock_name', 'stock_date', 'close_price'])
+            # 定义均线周期
+            ma_windows = [3, 5, 6, 7, 9, 10, 12, 20, 24, 26, 30, 60, 70, 125, 250]
 
-                get_max_update_date_sql = f'''
-                select max(stock_date) max_stock_date from {table} where stock_code = '{stock_code}'
-                '''
-                max_update = my.execute_read_query(conn, get_max_update_date_sql)
-                update_record_column = 'update_stock_date_ma'
-                if frequency == 'w':
-                    update_record_column = 'update_stock_week_ma'
-                if frequency == 'm':
-                    update_record_column = 'update_stock_month_ma'
-                update_sql = f'''
-                update stock.update_stock_record set {update_record_column} = '{max_update[0][0]}' where  stock_code = '{stock_code}'
-                '''
-                print(f'<{stock_code}>均线计算完毕...')
-                my.execute_query(conn, update_sql)
-            else:
-                print(f'<{stock_code}> 数据异常请核查！')
-                fu.write_to_file(f'{table}问题数据', f'{stock_code}')
+            # 计算移动平均线
+            def compute_ma(group):
+                group = group.sort_values('stock_date')
+                close = group['close_price'].astype(float)
+                for window in ma_windows:
+                    col_name = f'stock_ma{window}'
+                    group[col_name] = close.rolling(window=window).mean()
+                return group
 
+            ma_result = df.groupby('stock_code')[['stock_code', 'stock_date', 'close_price']].apply(
+                compute_ma).reset_index(level=0, drop=True)
+            ma_result = ma_result[['stock_code', 'stock_date', 'close_price'] + [f'stock_ma{w}' for w in ma_windows]]
+            if not if_init:
+                ma_result = ma_result.dropna(subset=['stock_ma250'])
+            if len(ma_result) > 0:
+                cnt = my.batch_insert_or_update(conn, ma_result, moving_table, "stock_code", "stock_date")
+                if cnt > 0:
+                    # 批量更新 update_stock_record 表
+                    update_records = []
+                    for stock_code in batch_df['stock_code']:
+                        get_max_update_date_sql = f'''
+                                                   select stock_code, max(stock_date) max_stock_date from {table} 
+                                                   where stock_code = '{stock_code}' group by stock_code
+                                                   '''
+                        max_update = my.execute_read_query(conn, get_max_update_date_sql)
+                        if max_update:
+                            max_stock_date = max_update[0][1]
+                            update_record_column = 'update_stock_date_ma'
+                            if frequency == 'w':
+                                update_record_column = 'update_stock_week_ma'
+                            if frequency == 'm':
+                                update_record_column = 'update_stock_month_ma'
+                            update_records.append((max_stock_date, stock_code, update_record_column))
+
+                    # 构建批量更新的 SQL 语句
+                    update_sql = f'''
+                                   UPDATE stock.update_stock_record
+                                   SET {update_record_column} = CASE stock_code
+                                   {"".join([f"WHEN '{record[1]}' THEN '{record[0]}'" for record in update_records])}
+                                   END
+                                   WHERE stock_code IN ({", ".join([f"'{record[1]}'" for record in update_records])})
+                                   '''
+                    my.execute_query(conn, update_sql)
     except Error as e:
         print(f"查询执行失败: {e}")
 
@@ -164,15 +149,18 @@ def calculate_stock_macd(frequency):
     engine = my.get_mysql_connection()
     select_table = 'stock_history_date_price'
     insert_table = 'date_stock_macd'
+    days = 7
     update_macd_column = 'update_stock_date_macd'
     if frequency == 'w':
         select_table = 'stock_history_week_price'
         insert_table = 'week_stock_macd'
         update_macd_column = 'update_stock_week_macd'
+        days = 70
     if frequency == 'm':
         select_table = 'stock_history_month_price'
         insert_table = 'month_stock_macd'
         update_macd_column = 'update_stock_month_macd'
+        days = 700
 
     stock_list = gs.get_stock_list_for_update_df()
     for i in range(0, len(stock_list), batch_size):
@@ -193,7 +181,7 @@ def calculate_stock_macd(frequency):
             ON a.stock_code = b.stock_code
 			JOIN (SELECT {update_macd_column},stock_code FROM stock.update_stock_record
 			where stock_code in ({result_string})) c
-            ON c.stock_code = b.stock_code and b.stock_date >= DATE_SUB( c.{update_macd_column},INTERVAL 7 day)
+            ON c.stock_code = b.stock_code and b.stock_date >= DATE_SUB( c.{update_macd_column},INTERVAL {days} day)
         '''
         stock_date_close_price = my.execute_read_query(engine, stock_date_price_sql)
         stock_df = pd.DataFrame(stock_date_close_price)
@@ -391,6 +379,7 @@ def calculate_stock_week_price():
         my.execute_query(engine, sql)
 
 
+# 识别MACD底背离
 def detect_macd_divergence(df, price_col='close_price', macd_col='macd',
                            window=20, min_interval=14, trend_length=30):
     # 数据校验
@@ -674,6 +663,7 @@ def dynamic_window(data, window):
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
     return rsi
+
 
 
 if __name__ == '__main__':
