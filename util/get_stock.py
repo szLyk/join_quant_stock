@@ -236,7 +236,7 @@ def update_all_stock_today_price(frequency):
             if flag:
                 insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', today)
                 my.execute_query(engine, insert_sql)
-            remove_redis_update_stock_code(frequency, i[0])
+                remove_redis_update_stock_code(frequency, i[0])
             tu.random_pause(1)
         elif frequency == 'w':
             df = get_some_stock_data(i[0], today, today, "w")
@@ -244,7 +244,7 @@ def update_all_stock_today_price(frequency):
             if flag:
                 insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', today)
                 my.execute_query(engine, insert_sql)
-            remove_redis_update_stock_code(frequency, i[0])
+                remove_redis_update_stock_code(frequency, i[0])
             tu.random_pause(1)
         elif frequency == 'm':
             df = get_some_stock_data(i[0], today, today, "m")
@@ -252,7 +252,7 @@ def update_all_stock_today_price(frequency):
             if flag:
                 insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', today)
                 my.execute_query(engine, insert_sql)
-            remove_redis_update_stock_code(frequency, i[0])
+                remove_redis_update_stock_code(frequency, i[0])
             tu.random_pause(1)
 
 
@@ -278,7 +278,7 @@ def update_all_stock_history_date_week_month_price(frequency):
                 if flag:
                     insert_sql = update_table_update_stock_record(i[1], i[0], 'update_stock_date', last_day)
                     my.execute_query(engine, insert_sql)
-                remove_redis_update_stock_code(frequency, i[0])
+                    remove_redis_update_stock_code(frequency, i[0])
                 tu.random_pause(2)
             elif frequency == 'w':
                 df = get_some_stock_data(i[0], i[2], last_day, "w")
@@ -286,7 +286,7 @@ def update_all_stock_history_date_week_month_price(frequency):
                 if flag:
                     insert_sql = update_table_update_stock_record(i[1], i[0], 'update_stock_week', last_day)
                     my.execute_query(engine, insert_sql)
-                remove_redis_update_stock_code(frequency, i[0])
+                    remove_redis_update_stock_code(frequency, i[0])
                 tu.random_pause(2)
             elif frequency == 'm':
                 df = get_some_stock_data(i[0], i[2], last_day, "m")
@@ -294,7 +294,7 @@ def update_all_stock_history_date_week_month_price(frequency):
                 if flag:
                     insert_sql = update_table_update_stock_record(i[1], i[0], 'update_stock_month', last_day)
                     my.execute_query(engine, insert_sql)
-                remove_redis_update_stock_code(frequency, i[0])
+                    remove_redis_update_stock_code(frequency, i[0])
                 tu.random_pause(2)
         else:
             print(f'<{i[1]}>股票数据已更新...最新数据：{i[2]}')
@@ -442,8 +442,8 @@ if __name__ == '__main__':
     # update_all_stock_history_date_week_month_price("m")
     # update_all_stock_history_date_week_month_price("m`")
     # update_all_stock_today_price('d')
-    # init_stock_profit_data(2025)
+    init_stock_profit_data(2025)
     # print(get_some_stock_data("sz.003008", "2025-03-19", "2025-03-19", "d"))
     # print(get_redis_update_stock_list('d', ''))
     # print(remove_redis_update_stock_code('d', 'sh.600000'))
-    update_all_stock_today_price('d')
+

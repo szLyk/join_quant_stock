@@ -3,7 +3,7 @@ import util.get_stock as gs
 import pandas as pd
 
 from stock_util.stock_indicator_util import calculate_stock_ma, calculate_stock_month_price, calculate_stock_macd, \
-    calculate_stock_week_price, calculate_today_stock_boll
+    calculate_stock_week_price, calculate_today_stock_boll, calculate_today_stock_cci
 from util.time_util import get_last_some_time, random_pause
 
 
@@ -87,9 +87,12 @@ if __name__ == '__main__':
     # calculate_stock_ma('w')
     # calculate_stock_macd('w')
     # calculate_stock_macd('m')
-    # gs.update_all_stock_today_price('d')
+    gs.update_all_stock_today_price('d')
+    calculate_stock_week_price()
+    calculate_stock_month_price()
     calculate_stock_ma('d')
     calculate_stock_macd('d')
     calculate_today_stock_boll()
+    calculate_today_stock_cci()
 
 

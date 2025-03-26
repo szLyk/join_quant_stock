@@ -505,14 +505,12 @@ def calculate_today_stock_boll():
     for record in stock_list.values:
         stock_code = record[0]
         stock_name = record[1]
-        data_list = []
-        columns = ['stock_code', 'stock_name', 'stock_date', 'boll_twenty', 'upper_rail', 'lower_rail']
         try:
             # 使用参数化查询防止 SQL 注入
             sql = f'''
             select a.stock_code,b.stock_name,a.stock_date,a.close_price,b.stock_ma20,rn from
             (SELECT * from
-            (SELECT *,ROW_NUMBER() OVER (PARTITION BY stock_code ORDER BY stock_date desc) rn
+            (SELECT *,ROW_NUMBER() OVER (PARTITION BY stock_code ORDER BY stock_date asc) rn
             from stock_history_date_price where stock_code = (
             select stock_code from stock.stock_basic where stock_code = '{stock_code}'
             ) and tradestatus = 1)a) a
@@ -524,38 +522,158 @@ def calculate_today_stock_boll():
             # 将结果转换为 DataFrame
             df = pd.DataFrame(result)
             length = len(df)
+            # 数据校验
+            if df.empty:
+                print(f"股票 {stock_code} 无数据，跳过处理。")
+                continue
+            if len(df) < 20:
+                print(f"股票 {stock_code} 数据不足20天，无法计算布林线。")
+                continue
             print(f'开始计算<{stock_name}>布林线...')
-            for index in range(length - 19):
-                window = df.iloc[index:index + 20]
+            # 向量化计算布林线指标
+            df['boll_twenty'] = df['stock_ma20'].astype(float)  # 中轨直接使用MA20
+            df['std_dev'] = df['close_price'].astype(float).rolling(window=20, min_periods=20).std(ddof=1)
+            df['upper_rail'] = df['boll_twenty'] + 2 * df['std_dev']
+            df['lower_rail'] = df['boll_twenty'] - 2 * df['std_dev']
 
-                # 检查是否有数据
-                if window.empty:
-                    raise ValueError(f"No data found for stock code: {stock_code}")
+            # 清理无效数据（前19天无法计算）
+            df.dropna(subset=['upper_rail', 'lower_rail'], inplace=True)
 
-                # 确保列名正确
-                required_columns = {'stock_ma20', 'stock_date'}
-                if not required_columns.issubset(window.columns):
-                    raise ValueError("The query result is missing required columns.")
+            # 准备写入数据（明确创建副本）
+            data_df = df[['stock_code', 'stock_name', 'stock_date', 'boll_twenty', 'upper_rail', 'lower_rail']].copy()
+            data_df = data_df.replace({np.nan: None})
 
-                # 获取 MA20 和其他基本信息
-                stock_ma20 = window['stock_ma20'].astype(float).iloc[0]  # 获取第一个值
-                max_date = window['stock_date'].max()  # 最大日期
+            # # 按日期降序排列结果（便于查看最新数据）
+            # data_df = data_df.sort_values('stock_date', ascending=False)
+            # 批量写入数据库
+            if not data_df.empty:
+                my.batch_insert_or_update(engine, data_df, update_table, 'stock_code', 'stock_date')
+                print(f"成功更新<{stock_name}>的布林线数据，共{len(data_df)}条记录。")
+            else:
+                print(f"无有效布林线数据可更新。")
+        except Exception as e:
+            print(f"处理股票 {stock_code} 时发生错误：{str(e)}")
+            raise e
 
-                # 计算标准差
-                standard_deviation = np.std(window['close_price'].astype(float), ddof=1)
 
-                # 计算布林带上轨和下轨
-                upper_rail = stock_ma20 + 2 * standard_deviation
-                lower_rail = stock_ma20 - 2 * standard_deviation
-                result_list = [stock_code, stock_name, max_date,stock_ma20, upper_rail, lower_rail]
-                data_list.append(result_list)
-            data_df = pd.DataFrame(data_list, columns=columns)
+def calculate_today_stock_cci():
+    # 获取数据库连接
+    engine = my.get_mysql_connection()
+    stock_list = gs.get_stock_list_for_update_df()
+    update_table = 'stock_date_cci'
+    for record in stock_list.values:
+        stock_code = record[0]
+        stock_name = record[1]
+        try:
+            # 使用参数化查询防止 SQL 注入
+            sql = f'''
+            select a.stock_code,b.stock_name,a.stock_date,a.close_price,b.stock_ma20,rn,
+                   a.open_price,a.high_price,a.low_price,
+                   ((a.high_price + a.low_price + a.close_price)/3) as tp
+             from
+            (SELECT * from
+            (SELECT *,ROW_NUMBER() OVER (PARTITION BY stock_code ORDER BY stock_date asc) rn
+            from stock_history_date_price where stock_code = (
+            select stock_code from stock.stock_basic where stock_code = '{stock_code}'
+            ) and tradestatus = 1)a) a
+            join date_stock_moving_average_table b on
+            a.stock_code = b.stock_code
+            and a.stock_date = b.stock_date;
+            '''
+            result = my.execute_read_query(engine, sql)
+            # 将结果转换为 DataFrame
+            df = pd.DataFrame(result)
+            length = len(df)
+            if df.empty:
+                print(f"股票 {stock_code} 无数据，跳过处理。")
+                continue
+
+            print(f'开始计算<{stock_name}>的CCI指标（全量历史数据）...')
+
+            # 计算14日滚动窗口的SMA和MAD
+            df['sma14'] = df['tp'].astype(float).rolling(window=14, min_periods=14).mean()
+            df['mad'] = df['tp'].astype(float).rolling(window=14, min_periods=14).apply(
+                lambda x: np.mean(np.abs(x - x.mean())), raw=True
+            )
+
+            # 计算CCI并清理无效数据
+            df['cci'] = (df['tp'].astype(float) - df['sma14'].astype(float)) / (0.015 * df['mad'])
+            df.dropna(subset=['cci'], inplace=True)  # 删除前13天无法计算的行
+
+            # # 按日期降序排列结果（便于查看最新数据）
+            # df = df.sort_values('stock_date', ascending=False)
+
+            # 准备写入数据库
+            data_df = df[['stock_code', 'stock_name', 'stock_date', 'tp', 'mad', 'cci']]
             data_df = data_df.replace({np.nan: None})
             if len(data_df) > 0:
                 my.batch_insert_or_update(engine, data_df, update_table, 'stock_code', 'stock_date')
-                print(f'计算<{stock_name}> 布林线成功！')
+                print(f'计算<{stock_name}> cci成功！')
         except Exception as e:
             raise e
+
+
+def calculate_stock_rsi():
+    engine = my.get_mysql_connection()
+    stock_list = gs.get_stock_list_for_update_df()
+    # stock_list = stock_list[stock_list['stock_code'] == 'sh.600000']
+    update_table = 'stock_date_rsi'
+    for record in stock_list.values:
+        stock_code = record[0]
+        stock_name = record[1]
+        sql = f'''
+        select a.stock_code,b.stock_name,a.stock_date,a.close_price from 
+        (select stock_code,stock_date,close_price from stock.stock_history_date_price where stock_code = '{stock_code}' 
+        and tradestatus = 1 ) a join (select stock_code,stock_name from stock.stock_basic where stock_code = '{stock_code}') b 
+        on a.stock_code = b.stock_code;
+        '''
+        result = my.execute_read_query(engine, sql)
+        df = pd.DataFrame(result)
+        # 按股票分组计算
+        print(f'开始计算<{stock_name}>rsi值')
+        result_dfs = []
+        for stock, group in df.groupby('stock_code'):
+            # 排序确保日期顺序
+            group = group.sort_values('stock_date')
+
+            # 计算各周期RSI
+            for window in [6, 12, 24]:
+                group[f'rsi_{window}'] = dynamic_window(group, window)
+
+            result_dfs.append(group)
+
+        # 合并结果
+        final_df = pd.concat(result_dfs)
+        final_df = final_df[final_df['rsi_6'].notna()]
+        # 注意：仅针对RSI列操作，保留其他字段原始值
+        rsi_columns = ['rsi_6', 'rsi_12', 'rsi_24']
+        final_df[rsi_columns] = final_df[rsi_columns].replace({np.nan: None})
+        if len(final_df) > 0:
+            my.batch_insert_or_update(engine, final_df, update_table, 'stock_code', 'stock_date')
+            print(f'<{stock_name}>rsi值完成计算')
+
+
+def dynamic_window(data, window):
+    # 计算价格变化
+    delta = data['close_price'].astype(float).diff()
+
+    # 分离上涨和下跌
+    gain = delta.where(delta > 0, 0)
+    loss = -delta.where(delta < 0, 0)
+
+    # 计算初始平均涨幅/跌幅（SMA）
+    avg_gain = gain.rolling(window).mean()
+    avg_loss = loss.rolling(window).mean()
+
+    # 计算后续EMA
+    for i in range(window, len(data)):
+        avg_gain.iloc[i] = (avg_gain.iloc[i - 1] * (window - 1) + gain.iloc[i]) / window
+        avg_loss.iloc[i] = (avg_loss.iloc[i - 1] * (window - 1) + loss.iloc[i]) / window
+
+    # 计算RS和RSI
+    rs = avg_gain / avg_loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
 
 
 if __name__ == '__main__':
@@ -583,4 +701,4 @@ if __name__ == '__main__':
     # {'-' * 60}""")
     # else:
     #     print("未检测到符合条件的底背离信号")
-    calculate_today_stock_boll()
+    calculate_stock_rsi()
