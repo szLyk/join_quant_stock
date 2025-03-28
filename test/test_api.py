@@ -88,13 +88,13 @@ if __name__ == '__main__':
     # calculate_stock_macd('w')
     # calculate_stock_macd('m')
 
-    gs.update_all_stock_today_price('d')
-    calculate_stock_week_price()
+    # gs.update_all_stock_today_price('d')
+    # calculate_stock_week_price()
     calculate_stock_month_price()
-    calculate_stock_ma('d')
-    calculate_stock_macd('d')
-    calculate_today_stock_boll()
-    calculate_today_stock_cci()
-    calculate_stock_rsi()
+    # calculate_stock_ma('d')
+    # calculate_stock_macd('d')
+    # calculate_today_stock_boll()
+    # calculate_today_stock_cci()
+    # calculate_stock_rsi()
 
 

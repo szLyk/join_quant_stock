@@ -47,8 +47,8 @@ def calculate_stock_ma(frequency, if_init=False, batch_size=20):
     conn = my.get_mysql_connection()
     stock_start_date_result = my.execute_read_query(conn, get_stock_start_date)
     stock_start_date_df = pd.DataFrame(stock_start_date_result,
-                                       columns=['stock_code', 'update_date', 'min_stock_date', 'sub_date_diff'])
-
+                                       columns=['stock_code', 'update_date', 'min_stock_date',
+                                                'sub_date_diff'])
     try:
         for i in range(0, len(stock_start_date_df), batch_size):
             batch_df = stock_start_date_df.iloc[i:i + batch_size]
@@ -105,9 +105,10 @@ def calculate_stock_ma(frequency, if_init=False, batch_size=20):
                     group[col_name] = close.rolling(window=window).mean()
                 return group
 
-            ma_result = df.groupby('stock_code')[['stock_code', 'stock_date', 'close_price']].apply(
+            ma_result = df.groupby('stock_code')[['stock_code', 'stock_name', 'stock_date', 'close_price']].apply(
                 compute_ma).reset_index(level=0, drop=True)
-            ma_result = ma_result[['stock_code', 'stock_date', 'close_price'] + [f'stock_ma{w}' for w in ma_windows]]
+            ma_result = ma_result[
+                ['stock_code', 'stock_name', 'stock_date', 'close_price'] + [f'stock_ma{w}' for w in ma_windows]]
             if not if_init:
                 ma_result = ma_result.dropna(subset=['stock_ma250'])
             if len(ma_result) > 0:
@@ -145,105 +146,127 @@ def calculate_stock_ma(frequency, if_init=False, batch_size=20):
 
 # 获取要计算的股票的MACD
 def calculate_stock_macd(frequency):
-    batch_size = 5
+    batch_size = 100  # 进一步增大批次量
     engine = my.get_mysql_connection()
-    select_table = 'stock_history_date_price'
-    insert_table = 'date_stock_macd'
-    days = 7
-    update_macd_column = 'update_stock_date_macd'
-    if frequency == 'w':
-        select_table = 'stock_history_week_price'
-        insert_table = 'week_stock_macd'
-        update_macd_column = 'update_stock_week_macd'
-        days = 70
-    if frequency == 'm':
-        select_table = 'stock_history_month_price'
-        insert_table = 'month_stock_macd'
-        update_macd_column = 'update_stock_month_macd'
-        days = 700
 
+    # 频率配置字典
+    freq_config = {
+        'd': ('stock_history_date_price', 'date_stock_macd', 'update_stock_date_macd', 7),
+        'w': ('stock_history_week_price', 'week_stock_macd', 'update_stock_week_macd', 70),
+        'm': ('stock_history_month_price', 'month_stock_macd', 'update_stock_month_macd', 700)
+    }
+    select_table, insert_table, update_col, days = freq_config[frequency[0]]
+
+    # 预定义EMA参数
+    alpha_12 = 2 / 13
+    alpha_26 = 2 / 27
+    alpha_9 = 2 / 10
+
+    # 获取待处理股票列表
     stock_list = gs.get_stock_list_for_update_df()
     for i in range(0, len(stock_list), batch_size):
-        batch_df = stock_list.iloc[i:i + batch_size]
-        stock_code = batch_df['stock_code']
-        result_string = ', '.join([f"'{value}'" for value in stock_code])
+        batch_codes = stock_list.iloc[i:i + batch_size]['stock_code'].unique()
+        code_str = ", ".join([f"'{code}'" for code in batch_codes])
 
-        stock_date_price_sql = f'''
-        SELECT
-            b.stock_code,
-            a.stock_name,
-            b.stock_date,
-            b.close_price
-        FROM
-            stock.{select_table} b
-            JOIN (SELECT stock_name, stock_code FROM stock.stock_basic
-            where stock_code in ({result_string}) and stock_type = 1 and stock_status = 1) a
-            ON a.stock_code = b.stock_code
-			JOIN (SELECT {update_macd_column},stock_code FROM stock.update_stock_record
-			where stock_code in ({result_string})) c
-            ON c.stock_code = b.stock_code and b.stock_date >= DATE_SUB( c.{update_macd_column},INTERVAL {days} day)
-        '''
-        stock_date_close_price = my.execute_read_query(engine, stock_date_price_sql)
-        stock_df = pd.DataFrame(stock_date_close_price)
-        stock_df['close_price'] = stock_df['close_price'].astype(float)
-        # 初始化平滑因子
-        alpha_12 = 2 / 13
-        alpha_26 = 2 / 27
-        alpha_9 = 2 / 10
+        # 一次性获取所有股票的更新状态和最新MACD记录
+        status_sql = f"""
+        SELECT stock_code, stock_date, ema_12, ema_26, dea, diff, macd
+        FROM stock.{insert_table}
+        WHERE (stock_code, stock_date) IN (
+            SELECT stock_code, DATE_SUB( update_stock_date_macd, 
+                            INTERVAL {days} DAY) 
+            FROM stock.update_stock_record
+            WHERE stock_code IN ({code_str})
+        )
+        """
 
+        result = my.execute_read_query(engine, status_sql)
+        status_df = pd.DataFrame(result,  columns=['stock_code', 'stock_name', 'ema_12', 'ema_26', 'dea', 'diff', 'macd'])
+        status_dict = status_df.set_index('stock_code').to_dict('index')
+
+        # 获取需要处理的价格数据（智能过滤）
+        price_sql = f"""
+        SELECT p.stock_code,stock_name, p.stock_date, p.close_price
+        FROM stock.{select_table} p
+        JOIN (
+            SELECT stock_code,stock_name,
+                   DATE_SUB({update_col},INTERVAL {days} DAY) as start_date
+            FROM stock.update_stock_record
+            WHERE stock_code IN ({code_str})
+        ) s ON p.stock_code = s.stock_code 
+           AND p.stock_date >= s.start_date
+        ORDER BY p.stock_code, p.stock_date
+        """
+
+        price_df = my.execute_read_query(engine, price_sql)
+        price_df = pd.DataFrame(price_df, columns=['stock_code', 'stock_name', 'stock_date', 'close_price'])
+        if price_df.empty:
+            continue
+
+        # 向量化计算函数
         def compute_macd(group):
-            df = group.sort_values(by='stock_date', ascending=True).reset_index(drop=True)
-            first_stock_code = df.loc[0, 'stock_code']
-            first_stock_date = df.loc[0, 'stock_date']
-            get_ema_value = f'''
-            select stock_code,stock_date,ema_12,ema_26,dea,diff,macd
-             from stock.{insert_table} where stock_code = '{first_stock_code}'
-            and stock_date = '{first_stock_date}'
-            '''
-            ma_value = my.execute_read_query(engine, get_ema_value)
-            # 使用SMA初始化EMA
-            if len(ma_value) == 0:
-                df['ema_12'] = df['close_price'].iloc[0]
-                df['ema_26'] = df['close_price'].iloc[0]
-                df.loc[0, 'dea'] = 0
-                df.loc[0, 'diff'] = 0
-                df.loc[0, 'macd'] = 0
+            code = group.name
+            group = group.sort_values(by='stock_date', ascending=True).reset_index(drop=True)
+            status = status_dict.get(code, {})
+            closes = group['close_price'].astype(float).values
+            dates = group['stock_date'].values
+            name = group['stock_name'].values
+
+            # 初始化数组
+            n = len(closes)
+            ema12 = np.empty(n)
+            ema26 = np.empty(n)
+            diff = np.empty(n)
+            dea = np.empty(n)
+            macd = np.empty(n)
+
+            # 判断初始化状态
+            if not status:
+                # 全新初始化
+                ema12[0] = ema26[0] = group['close_price'].iloc[0]
+                diff[0] = dea[0] = 0.0
             else:
-                df.loc[0, 'ema_12'] = float(ma_value[0][2])
-                df.loc[0, 'ema_26'] = float(ma_value[0][3])
-                df.loc[0, 'dea'] = float(ma_value[0][4])
-                df.loc[0, 'diff'] = float(ma_value[0][5])
-                df.loc[0, 'macd'] = float(ma_value[0][6])
+                # 增量计算
+                ema12[0] = status['ema_12']
+                ema26[0] = status['ema_26']
+                diff[0] = status['diff']
+                dea[0] = status['dea']
 
-            # 计算EMA12和EMA26
-            for i in range(1, len(df)):
-                df.loc[i, 'ema_12'] = alpha_12 * df.loc[i, 'close_price'] + (1 - alpha_12) * df.loc[i - 1, 'ema_12']
-                df.loc[i, 'ema_26'] = alpha_26 * df.loc[i, 'close_price'] + (1 - alpha_26) * df.loc[i - 1, 'ema_26']
-                df.loc[i, 'diff'] = df.loc[i, 'ema_12'] - df.loc[i, 'ema_26']
-                df.loc[i, 'dea'] = alpha_9 * df.loc[i, 'diff'] + (1 - alpha_9) * df.loc[i - 1, 'dea']
+            macd[0] = status.get('macd')
 
-            # # 计算DIFF和DEA(MACD线)
-            # df['diff'] = df['ema_12'] - df['ema_26']
-            # df['dea'] = df['diff'].ewm(span=9, adjust=False).mean()  # 使用pandas的ewm方法计算DEA
-            # # alpha_9 * Decimal(df.loc[i, 'diff']) + (Decimal('1') - alpha_9) * Decimal(df.loc[i - 1, 'dea'])
-            df['macd'] = (df['diff'] - df['dea']) * 2  # MACD是DIFF和DEA的差值乘以2
+            # 向量化迭代计算
+            for i in range(1, n):
+                ema12[i] = alpha_12 * closes[i] + (1 - alpha_12) * ema12[i - 1]
+                ema26[i] = alpha_26 * closes[i] + (1 - alpha_26) * ema26[i - 1]
+                diff[i] = ema12[i] - ema26[i]
+                dea[i] = alpha_9 * diff[i] + (1 - alpha_9) * dea[i - 1]
+                macd[i] = (diff[i] - dea[i]) * 2
 
-            return df
+            return pd.DataFrame({
+                'stock_code': code,
+                'stock_name': name,
+                'stock_date': dates,
+                'close_price': closes,
+                'ema_12': ema12,
+                'ema_26': ema26,
+                'diff': diff,
+                'dea': dea,
+                'macd': macd
+            })
 
-        # 对每个股票的数据进行分组计算MACD，并确保数据按日期排序
-        macd_df = stock_df.groupby('stock_code').apply(compute_macd).reset_index(level=0, drop=True)
+        # 分组并行计算
+        macd_df = price_df.groupby('stock_code', group_keys=False).apply(compute_macd).reset_index(level=0, drop=True)
 
-        cnt = my.batch_insert_or_update(engine, macd_df, insert_table, 'stock_code')
-        # 更新记录
-        if cnt > 0:
-            trade_date_sql = f'''
-            select stock_code,max(stock_date) as {update_macd_column} from stock.{select_table}
-            where stock_code in ({result_string})
-            group by stock_code
-            '''
-            result = my.execute_read_query(engine, trade_date_sql)
-            my.insert_or_update(engine, pd.DataFrame(result), 'update_stock_record', 'stock_code')
-            print(f'<{result_string} macd更新完毕....>')
+        # 批量更新
+        if not macd_df.empty:
+            # 更新MACD数据
+            my.batch_insert_or_update(engine, macd_df, insert_table, 'stock_code','stock_date')
+            # 直接更新状态表
+            max_dates = macd_df.groupby('stock_code')['stock_date'].max().reset_index()
+            max_dates.rename(columns={'stock_date': update_col}, inplace=True)
+            my.insert_or_update(engine, max_dates, 'update_stock_record', 'stock_code')
+
+            print(f"Processed {len(max_dates)} stocks, last batch: {batch_codes[-5:]}")
 
 
 # 计算当前未完整月份的收、开盘价以及涨跌幅度
@@ -665,7 +688,6 @@ def dynamic_window(data, window):
     return rsi
 
 
-
 if __name__ == '__main__':
     # # 参数配置
     # params = {
@@ -691,4 +713,6 @@ if __name__ == '__main__':
     # {'-' * 60}""")
     # else:
     #     print("未检测到符合条件的底背离信号")
-    calculate_stock_rsi()
+    # calculate_stock_macd('d')
+    calculate_stock_macd('w')
+    calculate_stock_macd('m')
