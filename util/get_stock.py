@@ -219,9 +219,10 @@ def update_all_stock_today_price(frequency):
         update_column = 'update_stock_month'
     today = tu.get_last_some_time(0)
     # 先出Redis
-    result_df = get_redis_update_stock_list(frequency)
+    result_df = get_redis_update_stock_list(update_column)
     if len(result_df) == 0:
-        result_df = set_redis_update_stock_list(frequency)
+        update_df = get_stock_list_for_update_df(update_column)[['stock_code', f'{update_column}']]
+        result_df = set_redis_update_stock_list(update_column, update_df)
     engine = my.get_mysql_connection()
     st_list = ', '.join([f"'{col}'" for col in result_df['stock_code'].values])
     sql = f'''
@@ -258,11 +259,19 @@ def update_all_stock_today_price(frequency):
 
 # 获取所有数据的历史数据（不包含当天数据）
 def update_all_stock_history_date_week_month_price(frequency):
+    # 频率配置字典
+    freq_config = {
+        'd': ('stock_history_date_price', 'update_stock_date'),
+        'w': ('stock_history_week_price', 'update_stock_week'),
+        'm': ('stock_history_month_price', 'update_stock_month')
+    }
+    select_table, update_column = freq_config[frequency[0]]
     last_day = tu.get_last_some_time(1)
     # 先出Redis
     result_df = get_redis_update_stock_list(frequency)
     if len(result_df) == 0:
-        result_df = set_redis_update_stock_list(frequency)
+        update_df = get_stock_list_for_update_df(update_column)[['stock_code', f'{update_column}']]
+        result_df = set_redis_update_stock_list(update_column, update_df)
     engine = my.get_mysql_connection()
     st_list = ', '.join([f"'{col}'" for col in result_df['stock_code'].values])
     sql = f'''
@@ -276,7 +285,7 @@ def update_all_stock_history_date_week_month_price(frequency):
                 df = get_some_stock_data(i[0], i[2], last_day, "d")
                 flag = insert_batch_into_stock_price_record(frequency, df)
                 if flag:
-                    insert_sql = update_table_update_stock_record(i[1], i[0], 'update_stock_date', last_day)
+                    insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', last_day)
                     my.execute_query(engine, insert_sql)
                     remove_redis_update_stock_code(frequency, i[0])
                 tu.random_pause(2)
@@ -284,7 +293,7 @@ def update_all_stock_history_date_week_month_price(frequency):
                 df = get_some_stock_data(i[0], i[2], last_day, "w")
                 flag = insert_batch_into_stock_price_record(frequency, df)
                 if flag:
-                    insert_sql = update_table_update_stock_record(i[1], i[0], 'update_stock_week', last_day)
+                    insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', last_day)
                     my.execute_query(engine, insert_sql)
                     remove_redis_update_stock_code(frequency, i[0])
                 tu.random_pause(2)
@@ -292,7 +301,7 @@ def update_all_stock_history_date_week_month_price(frequency):
                 df = get_some_stock_data(i[0], i[2], last_day, "m")
                 flag = insert_batch_into_stock_price_record(frequency, df)
                 if flag:
-                    insert_sql = update_table_update_stock_record(i[1], i[0], 'update_stock_month', last_day)
+                    insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', last_day)
                     my.execute_query(engine, insert_sql)
                     remove_redis_update_stock_code(frequency, i[0])
                 tu.random_pause(2)
@@ -397,42 +406,26 @@ def init_stock_profit_data(profit_year):
             print(f'<{stock_code}> 已更新')
 
 
-def set_redis_update_stock_list(frequency):
-    column = 'update_stock_date'
-    if frequency == 'w':
-        column = 'update_stock_week'
-    elif frequency == 'm':
-        column = 'update_stock_month'
-    df = get_stock_list_for_update_df(column)[['stock_code', f'{column}']]
+def set_redis_update_stock_list(key, df):
     today = tu.get_last_some_time(0)
     rs = RedisUtil()
     for record in df.values:
         timestamp = tu.turn_date_to_timestamp(record[1])
-        rs.add_sortSet(f'{today}_{column}', {f'{record[0]}': timestamp})
+        rs.add_sortSet(f'{today}_{key}', {f'{record[0]}': timestamp})
     return df
 
 
-def get_redis_update_stock_list(frequency):
-    column = 'update_stock_date'
-    if frequency == 'w':
-        column = 'update_stock_week'
-    elif frequency == 'm':
-        column = 'update_stock_month'
+def get_redis_update_stock_list(key):
     rs = RedisUtil()
     today = tu.get_last_some_time(0)
-    result = rs.get_sortSet_by_scoreRange(f'{today}_{column}', 0, '+inf')
+    result = rs.get_sortSet_by_scoreRange(f'{today}_{key}', 0, '+inf')
     return pd.DataFrame(result, columns=['stock_code'])
 
 
-def remove_redis_update_stock_code(frequency, stock_code):
-    column = 'update_stock_date'
-    if frequency == 'w':
-        column = 'update_stock_week'
-    elif frequency == 'm':
-        column = 'update_stock_month'
+def remove_redis_update_stock_code(key, stock_code):
     rs = RedisUtil()
     today = tu.get_last_some_time(0)
-    return rs.delete_sortSet_by_member(f'{today}_{column}', stock_code)
+    return rs.delete_sortSet_by_member(f'{today}_{key}', stock_code)
 
 
 # 计算股票交易日对应的周月日期
@@ -446,7 +439,7 @@ def init_stock_date_week_month():
     df['stock_week_date'] = df['stock_date'].map(tu.find_last_trading_day_of_week)
     df['stock_month_date'] = df['stock_date'].map(tu.find_last_trading_day_of_month)
     if len(df) > 0:
-        my.batch_insert_or_update(engine, df, 'stock_date_week_month','stock_date')
+        my.batch_insert_or_update(engine, df, 'stock_date_week_month', 'stock_date')
 
 
 if __name__ == '__main__':
@@ -455,7 +448,7 @@ if __name__ == '__main__':
     # update_all_stock_history_date_week_month_price("d")
     # update_all_stock_history_date_week_month_price("m")
     # update_all_stock_history_date_week_month_price("m`")
-    update_all_stock_today_price('w')
+    update_all_stock_today_price('d')
     # init_stock_date_week_month()
     # print(get_some_stock_data("sz.003008", "2025-03-19", "2025-03-19", "d"))
     # print(get_redis_update_stock_list('d', ''))

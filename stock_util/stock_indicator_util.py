@@ -277,6 +277,7 @@ def calculate_stock_macd(frequency):
     execution_time = end_time - start_time
     print(f"程序执行时间: {execution_time:.6f} 秒")
 
+
 # 计算当前未完整月份的收、开盘价以及涨跌幅度
 def calculate_stock_month_price():
     calculate_sql = f'''
@@ -517,7 +518,6 @@ def detect_macd_divergence(df, price_col='close_price', macd_col='macd',
     return pd.DataFrame(new_signals)
 
 
-
 def calculate_stock_boll(frequency, batch_size=10):
     start_time = time.time()
     engine = my.get_mysql_connection()
@@ -545,7 +545,7 @@ def calculate_stock_boll(frequency, batch_size=10):
             SELECT *, ROW_NUMBER() OVER (
                 PARTITION BY stock_code ORDER BY stock_date ASC
             ) rn
-            FROM stock_history_date_price 
+            FROM stock.{select_table} 
             WHERE stock_code IN ({code_str}) 
             {trade_status}
         ) a
