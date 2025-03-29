@@ -1,20 +1,17 @@
-import datetime
-import math
-
+import time
 from mysql.connector import Error
-
+import numpy as np
 import util.mysql_util as my
 import pandas as pd
 import util.time_util as tu
 import util.get_stock as gs
-import util.file_util as fu
-import numpy as np
 from scipy.signal import argrelextrema
-import matplotlib.pyplot as plt
+from numpy.lib.stride_tricks import sliding_window_view
 
 
 # 获取要计算的股票数据
 def calculate_stock_ma(frequency, if_init=False, batch_size=20):
+    start_time = time.time()
     table = 'stock_history_date_price'
     column = 'update_stock_date_ma'
     moving_table = 'date_stock_moving_average_table'
@@ -140,12 +137,18 @@ def calculate_stock_ma(frequency, if_init=False, batch_size=20):
                                    WHERE stock_code IN ({", ".join([f"'{record[1]}'" for record in update_records])})
                                    '''
                     my.execute_query(conn, update_sql)
+        # 记录结束时间
+        end_time = time.time()
+        # 计算执行时间
+        execution_time = end_time - start_time
+        print(f"程序执行时间: {execution_time:.6f} 秒")
     except Error as e:
         print(f"查询执行失败: {e}")
 
 
 # 获取要计算的股票的MACD
 def calculate_stock_macd(frequency):
+    start_time = time.time()
     batch_size = 100  # 进一步增大批次量
     engine = my.get_mysql_connection()
 
@@ -181,7 +184,8 @@ def calculate_stock_macd(frequency):
         """
 
         result = my.execute_read_query(engine, status_sql)
-        status_df = pd.DataFrame(result,  columns=['stock_code', 'stock_name', 'ema_12', 'ema_26', 'dea', 'diff', 'macd'])
+        status_df = pd.DataFrame(result,
+                                 columns=['stock_code', 'stock_name', 'ema_12', 'ema_26', 'dea', 'diff', 'macd'])
         status_dict = status_df.set_index('stock_code').to_dict('index')
 
         # 获取需要处理的价格数据（智能过滤）
@@ -260,14 +264,18 @@ def calculate_stock_macd(frequency):
         # 批量更新
         if not macd_df.empty:
             # 更新MACD数据
-            my.batch_insert_or_update(engine, macd_df, insert_table, 'stock_code','stock_date')
+            my.batch_insert_or_update(engine, macd_df, insert_table, 'stock_code', 'stock_date')
             # 直接更新状态表
             max_dates = macd_df.groupby('stock_code')['stock_date'].max().reset_index()
             max_dates.rename(columns={'stock_date': update_col}, inplace=True)
             my.insert_or_update(engine, max_dates, 'update_stock_record', 'stock_code')
 
             print(f"Processed {len(max_dates)} stocks, last batch: {batch_codes[-5:]}")
-
+    # 记录结束时间
+    end_time = time.time()
+    # 计算执行时间
+    execution_time = end_time - start_time
+    print(f"程序执行时间: {execution_time:.6f} 秒")
 
 # 计算当前未完整月份的收、开盘价以及涨跌幅度
 def calculate_stock_month_price():
@@ -509,183 +517,333 @@ def detect_macd_divergence(df, price_col='close_price', macd_col='macd',
     return pd.DataFrame(new_signals)
 
 
-def calculate_today_stock_boll():
-    # 获取数据库连接
+
+def calculate_stock_boll(frequency, batch_size=10):
+    start_time = time.time()
     engine = my.get_mysql_connection()
     stock_list = gs.get_stock_list_for_update_df()
-    update_table = 'stock_date_boll'
-    for record in stock_list.values:
-        stock_code = record[0]
-        stock_name = record[1]
-        try:
-            # 使用参数化查询防止 SQL 注入
-            sql = f'''
-            select a.stock_code,b.stock_name,a.stock_date,a.close_price,b.stock_ma20,rn from
-            (SELECT * from
-            (SELECT *,ROW_NUMBER() OVER (PARTITION BY stock_code ORDER BY stock_date asc) rn
-            from stock_history_date_price where stock_code = (
-            select stock_code from stock.stock_basic where stock_code = '{stock_code}'
-            ) and tradestatus = 1)a) a
-            join date_stock_moving_average_table b on
-            a.stock_code = b.stock_code
-            and a.stock_date = b.stock_date;
-            '''
-            result = my.execute_read_query(engine, sql)
-            # 将结果转换为 DataFrame
-            df = pd.DataFrame(result)
-            length = len(df)
-            # 数据校验
-            if df.empty:
-                print(f"股票 {stock_code} 无数据，跳过处理。")
-                continue
-            if len(df) < 20:
-                print(f"股票 {stock_code} 数据不足20天，无法计算布林线。")
-                continue
-            print(f'开始计算<{stock_name}>布林线...')
-            # 向量化计算布林线指标
-            df['boll_twenty'] = df['stock_ma20'].astype(float)  # 中轨直接使用MA20
-            df['std_dev'] = df['close_price'].astype(float).rolling(window=20, min_periods=20).std(ddof=1)
-            df['upper_rail'] = df['boll_twenty'] + 2 * df['std_dev']
-            df['lower_rail'] = df['boll_twenty'] - 2 * df['std_dev']
 
-            # 清理无效数据（前19天无法计算）
-            df.dropna(subset=['upper_rail', 'lower_rail'], inplace=True)
+    # 频率配置字典
+    freq_config = {
+        'd': ('stock_history_date_price', 'stock_date_boll', 'update_stock_date_boll', 'AND tradestatus = 1'),
+        'w': ('stock_history_week_price', 'stock_week_boll', 'update_stock_week_boll', ''),
+        'm': ('stock_history_month_price', 'stock_month_boll', 'update_stock_month_boll', '')
+    }
+    select_table, insert_table, update_col, trade_status = freq_config[frequency[0]]
+    update_table = 'update_stock_record'
+    for i in range(0, len(stock_list), batch_size):
+        batch_codes = stock_list.iloc[i:i + batch_size]['stock_code'].unique()
+        code_str = ", ".join([f"'{code}'" for code in batch_codes])
+        batch_names = stock_list.iloc[i:i + batch_size]['stock_name'].unique()
+        print(f'开始计算{batch_names}布尔值')
+        # 批量查询SQL（参数化防注入）
+        sql = f"""
+        SELECT 
+            a.stock_code, b.stock_name, a.stock_date, 
+            a.close_price, b.stock_ma20
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY stock_code ORDER BY stock_date ASC
+            ) rn
+            FROM stock_history_date_price 
+            WHERE stock_code IN ({code_str}) 
+            {trade_status}
+        ) a
+        JOIN date_stock_moving_average_table b 
+            ON a.stock_code = b.stock_code 
+            AND a.stock_date = b.stock_date;
+        """
+        # 执行批量查询
+        result = my.execute_read_query(engine, sql)
+        all_data = pd.DataFrame(result)
+        if all_data.empty:
+            print("无有效数据")
+            return
+        max_dates = []
 
-            # 准备写入数据（明确创建副本）
-            data_df = df[['stock_code', 'stock_name', 'stock_date', 'boll_twenty', 'upper_rail', 'lower_rail']].copy()
-            data_df = data_df.replace({np.nan: None})
+        def vectorized_bollinger_bands(close_prices, window=20, num_std=2):
+            """向量化计算布林线指标"""
+            n = len(close_prices)
+            if n < window:
+                return {
+                    'boll_twenty': np.full(n, np.nan),
+                    'upper_rail': np.full(n, np.nan),
+                    'lower_rail': np.full(n, np.nan)
+                }
 
-            # # 按日期降序排列结果（便于查看最新数据）
-            # data_df = data_df.sort_values('stock_date', ascending=False)
-            # 批量写入数据库
-            if not data_df.empty:
-                my.batch_insert_or_update(engine, data_df, update_table, 'stock_code', 'stock_date')
-                print(f"成功更新<{stock_name}>的布林线数据，共{len(data_df)}条记录。")
-            else:
-                print(f"无有效布林线数据可更新。")
-        except Exception as e:
-            print(f"处理股票 {stock_code} 时发生错误：{str(e)}")
-            raise e
+            # 计算滑动窗口视图
+            close_arr = np.array(close_prices, dtype=np.float64)
+            windows = sliding_window_view(close_arr, window)
+
+            # 计算中轨(MA20)
+            ma20 = np.mean(windows, axis=1)
+            boll_mid = np.concatenate([np.full(window - 1, np.nan), ma20])
+
+            # 计算标准差
+            stds = np.std(windows, ddof=1, axis=1)
+            stds_full = np.concatenate([np.full(window - 1, np.nan), stds])
+
+            # 计算上下轨
+            boll_upper = boll_mid + num_std * stds_full
+            boll_lower = boll_mid - num_std * stds_full
+
+            return {
+                'boll_twenty': boll_mid,
+                'upper_rail': boll_upper,
+                'lower_rail': boll_lower
+            }
+
+        # 分组并行计算
+        def process_group(group):
+            group = group.sort_values('stock_date')
+            close_prices = group['close_price'].values.astype(float)
+            stock_name = group['stock_name'].iloc[0]
+            max_date = group['stock_date'].max()
+            # 向量化计算布林线
+            boll = vectorized_bollinger_bands(close_prices)
+
+            # 组装结果
+            group['boll_twenty'] = boll['boll_twenty']
+            group['upper_rail'] = boll['upper_rail']
+            group['lower_rail'] = boll['lower_rail']
+            max_dates.append([stock_name, max_date])
+            return group.dropna(subset=['upper_rail'])
+
+        result_df = all_data.groupby('stock_code', group_keys=False).apply(process_group)
+
+        # 准备写入数据
+        output_cols = ['stock_code', 'stock_name', 'stock_date',
+                       'boll_twenty', 'upper_rail', 'lower_rail']
+        result_df = result_df[output_cols].replace({np.nan: None})
+
+        # 批量写入数据库
+        if not result_df.empty:
+            cnt = my.batch_insert_or_update(engine, result_df, insert_table,
+                                            'stock_code', 'stock_date')
+            if cnt > 0:
+                update_record = pd.DataFrame(max_dates, columns=['stock_code', f'{update_col}'])
+                my.batch_insert_or_update(engine, update_record, update_table, 'stock_code')
+                print(f"成功更新{batch_names}布林线数据")
+    # 记录结束时间
+    end_time = time.time()
+    # 计算执行时间
+    execution_time = end_time - start_time
+    print(f"程序执行时间: {execution_time:.6f} 秒")
 
 
-def calculate_today_stock_cci():
-    # 获取数据库连接
+def calculate_today_stock_cci(frequency, batch_size=10):
+    start_time = time.time()
     engine = my.get_mysql_connection()
     stock_list = gs.get_stock_list_for_update_df()
-    update_table = 'stock_date_cci'
-    for record in stock_list.values:
-        stock_code = record[0]
-        stock_name = record[1]
-        try:
-            # 使用参数化查询防止 SQL 注入
-            sql = f'''
-            select a.stock_code,b.stock_name,a.stock_date,a.close_price,b.stock_ma20,rn,
-                   a.open_price,a.high_price,a.low_price,
-                   ((a.high_price + a.low_price + a.close_price)/3) as tp
-             from
-            (SELECT * from
-            (SELECT *,ROW_NUMBER() OVER (PARTITION BY stock_code ORDER BY stock_date asc) rn
-            from stock_history_date_price where stock_code = (
-            select stock_code from stock.stock_basic where stock_code = '{stock_code}'
-            ) and tradestatus = 1)a) a
-            join date_stock_moving_average_table b on
-            a.stock_code = b.stock_code
-            and a.stock_date = b.stock_date;
-            '''
-            result = my.execute_read_query(engine, sql)
-            # 将结果转换为 DataFrame
-            df = pd.DataFrame(result)
-            length = len(df)
-            if df.empty:
-                print(f"股票 {stock_code} 无数据，跳过处理。")
-                continue
 
-            print(f'开始计算<{stock_name}>的CCI指标（全量历史数据）...')
+    # 频率配置字典
+    freq_config = {
+        'd': ('stock_history_date_price', 'stock_date_cci', 'update_stock_date_cci', 'AND tradestatus = 1'),
+        'w': ('stock_history_week_price', 'stock_week_cci', 'update_stock_week_cci', ''),
+        'm': ('stock_history_month_price', 'stock_month_cci', 'update_stock_month_cci', '')
+    }
+    select_table, insert_table, update_col, trade_status = freq_config[frequency[0]]
+    update_table = 'update_stock_record'
+    for i in range(0, len(stock_list), batch_size):
+        batch_codes = stock_list.iloc[i:i + batch_size]['stock_code'].unique()
+        code_str = ", ".join([f"'{code}'" for code in batch_codes])
+        batch_names = stock_list.iloc[i:i + batch_size]['stock_name'].unique()
+        print(f'开始计算{batch_names}CCi值')
+        # 批量查询SQL（参数化防注入）
+        sql = f"""
+        SELECT 
+            a.stock_code,b.stock_name,a.stock_date,
+            a.close_price,b.stock_ma20,rn,
+            a.open_price,a.high_price,a.low_price,
+            ((a.high_price + a.low_price + a.close_price)/3) as tp
+        FROM (
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY stock_code ORDER BY stock_date ASC
+            ) rn
+            FROM stock.{select_table} 
+            WHERE stock_code in ({code_str}) 
+            {trade_status}
+        ) a
+        JOIN date_stock_moving_average_table b 
+            ON a.stock_code = b.stock_code 
+            AND a.stock_date = b.stock_date;
+        """
 
-            # 计算14日滚动窗口的SMA和MAD
-            df['sma14'] = df['tp'].astype(float).rolling(window=14, min_periods=14).mean()
-            df['mad'] = df['tp'].astype(float).rolling(window=14, min_periods=14).apply(
-                lambda x: np.mean(np.abs(x - x.mean())), raw=True
-            )
+        # 执行批量查询
+        result = my.execute_read_query(engine, sql)
+        all_data = pd.DataFrame(result,
+                                columns=['stock_code', 'stock_name', 'stock_date', 'close_price', 'stock_ma20', 'rn',
+                                         'open_price', 'high_price', 'low_price', 'tp'])
+        if all_data.empty:
+            print("无有效数据")
+            return
+        max_dates = []
 
-            # 计算CCI并清理无效数据
-            df['cci'] = (df['tp'].astype(float) - df['sma14'].astype(float)) / (0.015 * df['mad'])
-            df.dropna(subset=['cci'], inplace=True)  # 删除前13天无法计算的行
+        def compute_rolling_mad(series, window):
+            """向量化计算滚动平均绝对差(MAD)"""
+            arr = series.values.astype(float)
+            n = len(arr)
+            if n < window:
+                return np.full(n, np.nan)
 
-            # # 按日期降序排列结果（便于查看最新数据）
-            # df = df.sort_values('stock_date', ascending=False)
+            # 生成滑动窗口视图
+            windows = sliding_window_view(arr, window)
+            # 计算每个窗口的均值
+            means = np.mean(windows, axis=1)
+            # 计算绝对差并求均值
+            mad_values = np.mean(np.abs(windows - means[:, None]), axis=1)
+            # 对齐原始数据长度（前window-1天为NaN）
+            return np.concatenate([np.full(window - 1, np.nan), mad_values])
 
-            # 准备写入数据库
-            data_df = df[['stock_code', 'stock_name', 'stock_date', 'tp', 'mad', 'cci']]
-            data_df = data_df.replace({np.nan: None})
-            if len(data_df) > 0:
-                my.batch_insert_or_update(engine, data_df, update_table, 'stock_code', 'stock_date')
-                print(f'计算<{stock_name}> cci成功！')
-        except Exception as e:
-            raise e
+        def batch_compute_cci(df_group):
+            """批量计算CCI指标"""
+            group = df_group.copy()
+            # 向量化计算TP（如果SQL未预先计算）
+            # group['tp'] = (group['high_price'] + group['low_price'] + group['close_price']) / 3
+            code = df_group.name
+            max_date = df_group['stock_date'].max()
+            # 计算14日SMA
+            group['sma14'] = group['tp'].astype(float).rolling(window=14, min_periods=14).mean()
+
+            # 向量化计算MAD
+            group['mad'] = compute_rolling_mad(group['tp'], 14)
+
+            # 计算CCI并清理数据
+            group['cci'] = (group['tp'].astype(float) - group['sma14']) / (0.015 * group['mad'])
+            max_dates.append([code, max_date])
+            return group.dropna(subset=['cci'])
+
+        # 并行分组计算
+        result_df = all_data.groupby('stock_code', group_keys=False).apply(batch_compute_cci)
+
+        # 准备写入数据
+        output_cols = ['stock_code', 'stock_name', 'stock_date', 'tp', 'mad', 'cci']
+        result_df = result_df[output_cols].replace({np.nan: None})
+
+        # 批量写入数据库
+        if not result_df.empty:
+            cnt = my.batch_insert_or_update(engine, result_df, insert_table, 'stock_code', 'stock_date')
+            if cnt > 0:
+                update_record = pd.DataFrame(max_dates, columns=['stock_code', f'{update_col}'])
+                my.batch_insert_or_update(engine, update_record, update_table, 'stock_code')
+                print(f'成功更新{batch_names}CCi值')
+    # 记录结束时间
+    end_time = time.time()
+    # 计算执行时间
+    execution_time = end_time - start_time
+    print(f"程序执行时间: {execution_time:.6f} 秒")
 
 
-def calculate_stock_rsi():
+def compute_all_rsi(close_prices, windows=[6, 12, 24]):
+    n = len(close_prices)
+    if n == 0:
+        return {f'rsi_{window}': np.array([]) for window in windows}
+
+    delta = np.zeros(n)
+    delta[1:] = np.diff(close_prices)
+
+    gain = np.where(delta > 0, delta, 0.0)
+    loss = np.where(delta < 0, -delta, 0.0)
+
+    rsis = {}
+
+    for window in windows:
+        if n < window:
+            rsi = np.full(n, np.nan)
+        else:
+            avg_gain = np.zeros(n)
+            avg_loss = np.zeros(n)
+
+            # 初始SMA（第window-1天）
+            start = window - 1
+            avg_gain[start] = np.mean(gain[:window])
+            avg_loss[start] = np.mean(loss[:window])
+
+            alpha = (window - 1) / window
+            beta = 1 / window
+
+            # 从第window天开始计算EMA（原代码为range(window, n)）
+            for i in range(window, n):
+                avg_gain[i] = avg_gain[i - 1] * alpha + gain[i] * beta
+                avg_loss[i] = avg_loss[i - 1] * alpha + loss[i] * beta
+
+            rs = np.divide(avg_gain, avg_loss, out=np.zeros_like(avg_gain), where=avg_loss != 0)
+            rsi = 100 - (100 / (1 + rs))
+            rsi[:window - 1] = np.nan  # 仅前window-1天无效
+
+        rsis[f'rsi_{window}'] = rsi
+
+    return rsis
+
+
+def calculate_stock_rsi(frequency, batch_size=10):
+    start_time = time.time()
+    # 频率配置字典
+    freq_config = {
+        'd': ('stock_history_date_price', 'stock_date_rsi', 'update_stock_date_rsi', 'AND tradestatus = 1'),
+        'w': ('stock_history_week_price', 'stock_week_rsi', 'update_stock_week_rsi', ''),
+        'm': ('stock_history_month_price', 'stock_month_rsi', 'update_stock_month_rsi', '')
+    }
+    select_table, insert_table, update_col, trade_status = freq_config[frequency[0]]
     engine = my.get_mysql_connection()
     stock_list = gs.get_stock_list_for_update_df()
-    # stock_list = stock_list[stock_list['stock_code'] == 'sh.600000']
-    update_table = 'stock_date_rsi'
-    for record in stock_list.values:
-        stock_code = record[0]
-        stock_name = record[1]
+    record_table = 'update_stock_record'
+    for i in range(0, len(stock_list), batch_size):
+        batch_codes = stock_list.iloc[i:i + batch_size]['stock_code'].unique()
+        batch_names = stock_list.iloc[i:i + batch_size]['stock_name'].unique()
+        code_str = ", ".join([f"'{code}'" for code in batch_codes])
         sql = f'''
-        select a.stock_code,b.stock_name,a.stock_date,a.close_price from 
-        (select stock_code,stock_date,close_price from stock.stock_history_date_price where stock_code = '{stock_code}' 
-        and tradestatus = 1 ) a join (select stock_code,stock_name from stock.stock_basic where stock_code = '{stock_code}') b 
-        on a.stock_code = b.stock_code;
+        SELECT a.stock_code,b.stock_name,a.stock_date,a.close_price 
+        FROM (
+            SELECT stock_code,stock_date,close_price 
+            FROM stock.{select_table} 
+            WHERE stock_code in ({code_str})
+            {trade_status}
+        ) a 
+        JOIN (
+            SELECT stock_code,stock_name 
+            FROM stock.stock_basic 
+            WHERE stock_code in ({code_str})
+            and stock_type = 1 and stock_status = 1
+        ) b 
+        ON a.stock_code = b.stock_code
         '''
         result = my.execute_read_query(engine, sql)
-        df = pd.DataFrame(result)
-        # 按股票分组计算
-        print(f'开始计算<{stock_name}>rsi值')
+        df = pd.DataFrame(result, columns=['stock_code', 'stock_name', 'stock_date', 'close_price'])
+        print(f'开始计算{batch_names}RSI值')
         result_dfs = []
+        max_dates = []
         for stock, group in df.groupby('stock_code'):
-            # 排序确保日期顺序
             group = group.sort_values('stock_date')
-
-            # 计算各周期RSI
+            close_prices = group['close_price'].values.astype(float)
+            max_date = group['stock_date'].max()
+            # 批量计算所有窗口RSI
+            rsis = compute_all_rsi(close_prices, windows=[6, 12, 24])
+            # 将结果添加到DataFrame
             for window in [6, 12, 24]:
-                group[f'rsi_{window}'] = dynamic_window(group, window)
+                group[f'rsi_{window}'] = rsis[f'rsi_{window}']
 
             result_dfs.append(group)
+            max_dates.append([stock, max_date])
 
-        # 合并结果
         final_df = pd.concat(result_dfs)
         final_df = final_df[final_df['rsi_6'].notna()]
-        # 注意：仅针对RSI列操作，保留其他字段原始值
+
+        # 替换NaN为None以适应数据库
         rsi_columns = ['rsi_6', 'rsi_12', 'rsi_24']
         final_df[rsi_columns] = final_df[rsi_columns].replace({np.nan: None})
+
         if len(final_df) > 0:
-            my.batch_insert_or_update(engine, final_df, update_table, 'stock_code', 'stock_date')
-            print(f'<{stock_name}>rsi值完成计算')
-
-
-def dynamic_window(data, window):
-    # 计算价格变化
-    delta = data['close_price'].astype(float).diff()
-
-    # 分离上涨和下跌
-    gain = delta.where(delta > 0, 0)
-    loss = -delta.where(delta < 0, 0)
-
-    # 计算初始平均涨幅/跌幅（SMA）
-    avg_gain = gain.rolling(window).mean()
-    avg_loss = loss.rolling(window).mean()
-
-    # 计算后续EMA
-    for i in range(window, len(data)):
-        avg_gain.iloc[i] = (avg_gain.iloc[i - 1] * (window - 1) + gain.iloc[i]) / window
-        avg_loss.iloc[i] = (avg_loss.iloc[i - 1] * (window - 1) + loss.iloc[i]) / window
-
-    # 计算RS和RSI
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+            cnt = my.batch_insert_or_update(engine, final_df, insert_table, 'stock_code', 'stock_date', batch_size=1500)
+            if cnt > 0:
+                update_record = pd.DataFrame(max_dates, columns=['stock_name', f'{update_col}'])
+                my.insert_or_update(engine, update_record, record_table, 'stock_code')
+            print(f'{batch_names}RSI值计算完成')
+    # 记录结束时间
+    end_time = time.time()
+    # 计算执行时间
+    execution_time = end_time - start_time
+    print(f"程序执行时间: {execution_time:.6f} 秒")
 
 
 if __name__ == '__main__':
@@ -714,5 +872,7 @@ if __name__ == '__main__':
     # else:
     #     print("未检测到符合条件的底背离信号")
     # calculate_stock_macd('d')
-    calculate_stock_macd('w')
-    calculate_stock_macd('m')
+    # calculate_stock_macd('w')
+    # calculate_stock_macd('m')
+
+    calculate_stock_boll('d')

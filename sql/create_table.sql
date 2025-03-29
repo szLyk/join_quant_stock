@@ -367,3 +367,110 @@ CREATE TABLE if not exists stock.stock_date_rsi (
   KEY `index_stock_date` (`stock_date`) USING BTREE
 )comment = '计算股票每日的相对强弱指标',
 ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+
+drop table if exists stock.stock_week_rsi;
+CREATE TABLE if not exists stock.stock_week_rsi (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(20) NOT NULL COMMENT '证券代码',
+  `stock_name` varchar(20) NOT NULL COMMENT '股票名称',
+  `stock_date` date NOT NULL COMMENT '交易所行情日期',
+  `close_price` decimal(10,4) DEFAULT NULL COMMENT '收盘价',
+  `rsi_6` decimal(10,4) DEFAULT NULL COMMENT '6周期',
+  `rsi_12` decimal(10,4) DEFAULT NULL COMMENT '12周期',
+  `rsi_24` decimal(10,4) DEFAULT NULL COMMENT '24周期',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `index_stock_date_price` (`stock_code`,`stock_date`) USING BTREE,
+  KEY `index_stock_name` (`stock_name`) USING BTREE,
+  KEY `index_stock_date` (`stock_date`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='计算股票每周的相对强弱指标';
+
+drop table if exists stock.stock_month_rsi;
+CREATE TABLE if not exists stock.stock_month_rsi (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(20) NOT NULL COMMENT '证券代码',
+  `stock_name` varchar(20) NOT NULL COMMENT '股票名称',
+  `stock_date` date NOT NULL COMMENT '交易所行情日期',
+  `close_price` decimal(10,4) DEFAULT NULL COMMENT '收盘价',
+  `rsi_6` decimal(10,4) DEFAULT NULL COMMENT '6周期',
+  `rsi_12` decimal(10,4) DEFAULT NULL COMMENT '12周期',
+  `rsi_24` decimal(10,4) DEFAULT NULL COMMENT '24周期',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `index_stock_date_price` (`stock_code`,`stock_date`) USING BTREE,
+  KEY `index_stock_name` (`stock_name`) USING BTREE,
+  KEY `index_stock_date` (`stock_date`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='计算股票每月的相对强弱指标';
+
+
+drop table if exists stock.stock_week_cci;
+CREATE TABLE stock.stock_week_cci (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(20) NOT NULL COMMENT '证券代码',
+  `stock_name` varchar(20) NOT NULL COMMENT '股票名称',
+  `stock_date` date NOT NULL COMMENT '交易所行情日期',
+  `tp` decimal(10,4) DEFAULT NULL COMMENT '（最高价+最低价+收盘价）÷3',
+  `mad` decimal(10,4) DEFAULT NULL COMMENT '平均绝对偏差',
+  `cci` decimal(10,4) DEFAULT NULL COMMENT '顺势指标',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `index_stock_date_price` (`stock_code`,`stock_date`) USING BTREE,
+  KEY `index_stock_name` (`stock_name`) USING BTREE,
+  KEY `index_stock_date` (`stock_date`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='计算股票每周的顺势指标';
+
+drop table if exists stock.stock_month_cci;
+CREATE TABLE stock.stock_month_cci (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(20) NOT NULL COMMENT '证券代码',
+  `stock_name` varchar(20) NOT NULL COMMENT '股票名称',
+  `stock_date` date NOT NULL COMMENT '交易所行情日期',
+  `tp` decimal(10,4) DEFAULT NULL COMMENT '（最高价+最低价+收盘价）÷3',
+  `mad` decimal(10,4) DEFAULT NULL COMMENT '平均绝对偏差',
+  `cci` decimal(10,4) DEFAULT NULL COMMENT '顺势指标',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `index_stock_date_price` (`stock_code`,`stock_date`) USING BTREE,
+  KEY `index_stock_name` (`stock_name`) USING BTREE,
+  KEY `index_stock_date` (`stock_date`) USING BTREE
+) ENGINE=InnoDB AUTO_INCREMENT=59578281 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='计算股票每月的顺势指标';
+
+
+drop table if exists stock.stock_week_boll;
+CREATE TABLE stock.stock_week_boll (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(20) NOT NULL COMMENT '证券代码',
+  `stock_name` varchar(20) NOT NULL COMMENT '股票名称',
+  `stock_date` date NOT NULL COMMENT '交易所行情日期',
+  `boll_twenty` decimal(10,4) DEFAULT NULL COMMENT '布林线中轨',
+  `upper_rail` decimal(10,4) DEFAULT NULL COMMENT '布林线上轨',
+  `lower_rail` decimal(10,4) DEFAULT NULL COMMENT '布林线下轨',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `index_stock_date_price` (`stock_code`,`stock_date`) USING BTREE,
+  KEY `index_stock_name` (`stock_name`) USING BTREE,
+  KEY `index_stock_date` (`stock_date`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='计算股票每周的布林线';
+
+drop table if exists stock.stock_month_boll;
+CREATE TABLE stock.stock_month_boll (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(20) NOT NULL COMMENT '证券代码',
+  `stock_name` varchar(20) NOT NULL COMMENT '股票名称',
+  `stock_date` date NOT NULL COMMENT '交易所行情日期',
+  `boll_twenty` decimal(10,4) DEFAULT NULL COMMENT '布林线中轨',
+  `upper_rail` decimal(10,4) DEFAULT NULL COMMENT '布林线上轨',
+  `lower_rail` decimal(10,4) DEFAULT NULL COMMENT '布林线下轨',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `index_stock_date_price` (`stock_code`,`stock_date`) USING BTREE,
+  KEY `index_stock_name` (`stock_name`) USING BTREE,
+  KEY `index_stock_date` (`stock_date`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='计算股票每月的布林线';
