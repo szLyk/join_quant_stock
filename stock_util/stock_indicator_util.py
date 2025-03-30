@@ -7,6 +7,7 @@ import util.time_util as tu
 import util.get_stock as gs
 from scipy.signal import argrelextrema
 from numpy.lib.stride_tricks import sliding_window_view
+import util.redis_util as ru
 
 
 # 获取要计算的股票数据
@@ -521,36 +522,49 @@ def detect_macd_divergence(df, price_col='close_price', macd_col='macd',
 def calculate_stock_boll(frequency, batch_size=10):
     start_time = time.time()
     engine = my.get_mysql_connection()
-    stock_list = gs.get_stock_list_for_update_df()
 
     # 频率配置字典
     freq_config = {
-        'd': ('stock_history_date_price', 'stock_date_boll', 'update_stock_date_boll', 'AND tradestatus = 1'),
-        'w': ('stock_history_week_price', 'stock_week_boll', 'update_stock_week_boll', ''),
-        'm': ('stock_history_month_price', 'stock_month_boll', 'update_stock_month_boll', '')
+        'd': (
+            'stock_history_date_price', 'date_stock_moving_average_table', 'stock_date_boll', 'update_stock_date_boll',
+            'AND tradestatus = 1'),
+        'w': (
+            'stock_history_week_price', 'week_stock_moving_average_table', 'stock_week_boll', 'update_stock_week_boll',
+            ''),
+        'm': (
+            'stock_history_month_price', 'month_stock_moving_average_table', 'stock_month_boll',
+            'update_stock_month_boll',
+            '')
     }
-    select_table, insert_table, update_col, trade_status = freq_config[frequency[0]]
+    stock_table, moving_table, insert_table, update_col, trade_status = freq_config[frequency[0]]
     update_table = 'update_stock_record'
-    for i in range(0, len(stock_list), batch_size):
-        batch_codes = stock_list.iloc[i:i + batch_size]['stock_code'].unique()
+    update_df = gs.get_redis_stock_list(update_col)
+    if len(update_df) == 0:
+        update_df = gs.get_stock_list_for_update_df()[['stock_code', 'stock_name']]
+        update_df = update_df['stock_code'] + ':' + update_df['stock_name']
+        gs.set_redis_stock_list(update_col, update_df)
+    update_df = gs.split_stock_name(update_df)
+    for i in range(0, len(update_df), batch_size):
+        batch_df = update_df.iloc[i:i + batch_size]
+        batch_codes = batch_df['stock_code'].unique()
         code_str = ", ".join([f"'{code}'" for code in batch_codes])
-        batch_names = stock_list.iloc[i:i + batch_size]['stock_name'].unique()
+        batch_names = batch_df['stock_name'].unique()
         print(f'开始计算{batch_names}布尔值')
         # 批量查询SQL（参数化防注入）
         sql = f"""
-        SELECT 
-            a.stock_code, b.stock_name, a.stock_date, 
+        SELECT
+            a.stock_code, b.stock_name, a.stock_date,
             a.close_price, b.stock_ma20
         FROM (
             SELECT *, ROW_NUMBER() OVER (
                 PARTITION BY stock_code ORDER BY stock_date ASC
             ) rn
-            FROM stock.{select_table} 
-            WHERE stock_code IN ({code_str}) 
+            FROM stock.{stock_table}
+            WHERE stock_code IN ({code_str})
             {trade_status}
         ) a
-        JOIN date_stock_moving_average_table b 
-            ON a.stock_code = b.stock_code 
+        JOIN stock.{moving_table} b
+            ON a.stock_code = b.stock_code
             AND a.stock_date = b.stock_date;
         """
         # 执行批量查询
@@ -621,6 +635,9 @@ def calculate_stock_boll(frequency, batch_size=10):
             cnt = my.batch_insert_or_update(engine, result_df, insert_table,
                                             'stock_code', 'stock_date')
             if cnt > 0:
+                stock_names = batch_df['stock_code'] + ":" + batch_df['stock_name']
+                for code in stock_names:
+                    gs.remove_redis_update_stock_code(update_col, code)
                 update_record = pd.DataFrame(max_dates, columns=['stock_code', f'{update_col}'])
                 my.batch_insert_or_update(engine, update_record, update_table, 'stock_code')
                 print(f"成功更新{batch_names}布林线数据")
@@ -631,23 +648,34 @@ def calculate_stock_boll(frequency, batch_size=10):
     print(f"程序执行时间: {execution_time:.6f} 秒")
 
 
-def calculate_today_stock_cci(frequency, batch_size=10):
+def calculate_stock_cci(frequency, batch_size=10):
     start_time = time.time()
     engine = my.get_mysql_connection()
-    stock_list = gs.get_stock_list_for_update_df()
-
     # 频率配置字典
     freq_config = {
-        'd': ('stock_history_date_price', 'stock_date_cci', 'update_stock_date_cci', 'AND tradestatus = 1'),
-        'w': ('stock_history_week_price', 'stock_week_cci', 'update_stock_week_cci', ''),
-        'm': ('stock_history_month_price', 'stock_month_cci', 'update_stock_month_cci', '')
+        'd': ('stock_history_date_price', 'date_stock_moving_average_table', 'stock_date_cci', 'update_stock_date_cci',
+              'AND tradestatus = 1'),
+        'w': (
+            'stock_history_week_price', 'week_stock_moving_average_table', 'stock_week_cci', 'update_stock_week_cci',
+            ''),
+        'm': (
+            'stock_history_month_price', 'month_stock_moving_average_table', 'stock_month_cci',
+            'update_stock_month_cci',
+            '')
     }
-    select_table, insert_table, update_col, trade_status = freq_config[frequency[0]]
+    stock_table, moving_table, insert_table, update_col, trade_status = freq_config[frequency[0]]
     update_table = 'update_stock_record'
+    stock_list = gs.get_redis_stock_list(update_col)
+    if len(stock_list) == 0:
+        stock_list = gs.get_stock_list_for_update_df()[['stock_code', 'stock_name']]
+        stock_list = stock_list['stock_code'] + ':' + stock_list['stock_name']
+        gs.set_redis_stock_list(update_col, stock_list)
+    stock_list = gs.split_stock_name(stock_list)
     for i in range(0, len(stock_list), batch_size):
-        batch_codes = stock_list.iloc[i:i + batch_size]['stock_code'].unique()
+        batch_df = stock_list.iloc[i:i + batch_size]
+        batch_codes = batch_df['stock_code'].unique()
         code_str = ", ".join([f"'{code}'" for code in batch_codes])
-        batch_names = stock_list.iloc[i:i + batch_size]['stock_name'].unique()
+        batch_names = batch_df['stock_name'].unique()
         print(f'开始计算{batch_names}CCi值')
         # 批量查询SQL（参数化防注入）
         sql = f"""
@@ -660,11 +688,11 @@ def calculate_today_stock_cci(frequency, batch_size=10):
             SELECT *, ROW_NUMBER() OVER (
                 PARTITION BY stock_code ORDER BY stock_date ASC
             ) rn
-            FROM stock.{select_table} 
+            FROM stock.{stock_table} 
             WHERE stock_code in ({code_str}) 
             {trade_status}
         ) a
-        JOIN date_stock_moving_average_table b 
+        JOIN stock.{moving_table} b 
             ON a.stock_code = b.stock_code 
             AND a.stock_date = b.stock_date;
         """
@@ -724,6 +752,9 @@ def calculate_today_stock_cci(frequency, batch_size=10):
         if not result_df.empty:
             cnt = my.batch_insert_or_update(engine, result_df, insert_table, 'stock_code', 'stock_date')
             if cnt > 0:
+                stock_names = batch_df['stock_code'] + ":" + batch_df['stock_name']
+                for code in stock_names:
+                    gs.remove_redis_update_stock_code(update_col, code)
                 update_record = pd.DataFrame(max_dates, columns=['stock_code', f'{update_col}'])
                 my.batch_insert_or_update(engine, update_record, update_table, 'stock_code')
                 print(f'成功更新{batch_names}CCi值')
@@ -786,11 +817,17 @@ def calculate_stock_rsi(frequency, batch_size=10):
     }
     select_table, insert_table, update_col, trade_status = freq_config[frequency[0]]
     engine = my.get_mysql_connection()
-    stock_list = gs.get_stock_list_for_update_df()
     record_table = 'update_stock_record'
+    stock_list = gs.get_redis_stock_list(update_col)
+    if len(stock_list) == 0:
+        stock_list = gs.get_stock_list_for_update_df()[['stock_code', 'stock_name']]
+        stock_list = stock_list['stock_code'] + ':' + stock_list['stock_name']
+        gs.set_redis_stock_list(update_col, stock_list)
+    stock_list = gs.split_stock_name(stock_list)
     for i in range(0, len(stock_list), batch_size):
-        batch_codes = stock_list.iloc[i:i + batch_size]['stock_code'].unique()
-        batch_names = stock_list.iloc[i:i + batch_size]['stock_name'].unique()
+        batch_df = stock_list.iloc[i:i + batch_size]
+        batch_codes = batch_df['stock_code'].unique()
+        batch_names = batch_df['stock_name'].unique()
         code_str = ", ".join([f"'{code}'" for code in batch_codes])
         sql = f'''
         SELECT a.stock_code,b.stock_name,a.stock_date,a.close_price 
@@ -836,6 +873,9 @@ def calculate_stock_rsi(frequency, batch_size=10):
         if len(final_df) > 0:
             cnt = my.batch_insert_or_update(engine, final_df, insert_table, 'stock_code', 'stock_date', batch_size=1500)
             if cnt > 0:
+                stock_names = batch_df['stock_code'] + ":" + batch_df['stock_name']
+                for code in stock_names:
+                    gs.remove_redis_update_stock_code(update_col, code)
                 update_record = pd.DataFrame(max_dates, columns=['stock_name', f'{update_col}'])
                 my.insert_or_update(engine, update_record, record_table, 'stock_code')
             print(f'{batch_names}RSI值计算完成')
@@ -875,4 +915,7 @@ if __name__ == '__main__':
     # calculate_stock_macd('w')
     # calculate_stock_macd('m')
 
-    calculate_stock_boll('d')
+    calculate_stock_rsi('m')
+    # calculate_stock_boll('w')
+    # calculate_stock_cci('m')
+    # calculate_stock_cci('w')

@@ -221,8 +221,8 @@ def update_all_stock_today_price(frequency):
     # 先出Redis
     result_df = get_redis_update_stock_list(update_column)
     if len(result_df) == 0:
-        update_df = get_stock_list_for_update_df(update_column)[['stock_code', f'{update_column}']]
-        result_df = set_redis_update_stock_list(update_column, update_df)
+        result_df = get_stock_list_for_update_df(update_column)[['stock_code', f'{update_column}']]
+        set_redis_update_stock_list(update_column, result_df)
     engine = my.get_mysql_connection()
     st_list = ', '.join([f"'{col}'" for col in result_df['stock_code'].values])
     sql = f'''
@@ -270,8 +270,8 @@ def update_all_stock_history_date_week_month_price(frequency):
     # 先出Redis
     result_df = get_redis_update_stock_list(frequency)
     if len(result_df) == 0:
-        update_df = get_stock_list_for_update_df(update_column)[['stock_code', f'{update_column}']]
-        result_df = set_redis_update_stock_list(update_column, update_df)
+        result_df = get_stock_list_for_update_df(update_column)[['stock_code', f'{update_column}']]
+        set_redis_update_stock_list(update_column, result_df)
     engine = my.get_mysql_connection()
     st_list = ', '.join([f"'{col}'" for col in result_df['stock_code'].values])
     sql = f'''
@@ -412,7 +412,14 @@ def set_redis_update_stock_list(key, df):
     for record in df.values:
         timestamp = tu.turn_date_to_timestamp(record[1])
         rs.add_sortSet(f'{today}_{key}', {f'{record[0]}': timestamp})
-    return df
+
+
+def set_redis_stock_list(key, result):
+    today = tu.get_last_some_time(0)
+    rs = RedisUtil()
+    for record in result:
+        timestamp = tu.turn_date_to_timestamp(today)
+        rs.add_sortSet(f'{today}_{key}', {f'{record}': timestamp})
 
 
 def get_redis_update_stock_list(key):
@@ -422,10 +429,32 @@ def get_redis_update_stock_list(key):
     return pd.DataFrame(result, columns=['stock_code'])
 
 
+def get_redis_stock_list(key):
+    rs = RedisUtil()
+    today = tu.get_last_some_time(0)
+    result = rs.get_sortSet_by_scoreRange(f'{today}_{key}', 0, '+inf')
+    return result
+
+
 def remove_redis_update_stock_code(key, stock_code):
     rs = RedisUtil()
     today = tu.get_last_some_time(0)
     return rs.delete_sortSet_by_member(f'{today}_{key}', stock_code)
+
+
+def split_stock_name(stock_list):
+    # 创建初始 DataFrame
+    df = pd.DataFrame(stock_list, columns=['raw_data'])
+
+    # 过滤掉无效记录
+    valid_mask = df['raw_data'].str.contains(":", na=False)
+    df_valid = df[valid_mask]
+
+    # 使用 str.split 扩展列
+    df_split = df_valid['raw_data'].str.split(":", expand=True, n=1)
+    df_split.columns = ['stock_code', 'stock_name']
+
+    return df_split
 
 
 # 计算股票交易日对应的周月日期
