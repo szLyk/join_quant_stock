@@ -474,3 +474,55 @@ CREATE TABLE stock.stock_month_boll (
   KEY `index_stock_name` (`stock_name`) USING BTREE,
   KEY `index_stock_date` (`stock_date`) USING BTREE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='计算股票每月的布林线';
+
+
+drop table if exists stock.stock_date_obv;
+CREATE TABLE stock.stock_date_obv (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(20) NOT NULL COMMENT '证券代码',
+  `stock_name` varchar(20) NOT NULL COMMENT '股票名称',
+  `stock_date` date NOT NULL COMMENT '交易所行情日期',
+  `trading_volume` decimal(20,4) comment '成交量（累计 单位：股）',
+  `obv` decimal(20,4) DEFAULT NULL COMMENT '平衡交易量',
+  `30ma_obv` decimal(20,4) DEFAULT NULL COMMENT '30日平衡交易量',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `index_stock_date_price` (`stock_code`,`stock_date`) USING BTREE,
+  KEY `index_stock_name` (`stock_name`) USING BTREE,
+  KEY `index_stock_date` (`stock_date`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='计算股票每日的平衡交易量';
+
+drop table if exists stock.stock_week_obv;
+CREATE TABLE stock.stock_week_obv (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(20) NOT NULL COMMENT '证券代码',
+  `stock_name` varchar(20) NOT NULL COMMENT '股票名称',
+  `stock_date` date NOT NULL COMMENT '交易所行情日期',
+  `trading_volume` decimal(20,4) comment '成交量（累计 单位：股）',
+  `obv` decimal(20,4) DEFAULT NULL COMMENT '平衡交易量',
+  `30ma_obv` decimal(20,4) DEFAULT NULL COMMENT '30日平衡交易量',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `index_stock_date_price` (`stock_code`,`stock_date`) USING BTREE,
+  KEY `index_stock_name` (`stock_name`) USING BTREE,
+  KEY `index_stock_date` (`stock_date`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='计算股票每周的平衡交易量';
+
+drop table if exists stock.stock_month_obv;
+CREATE TABLE stock.stock_month_obv (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `stock_code` varchar(20) NOT NULL COMMENT '证券代码',
+  `stock_name` varchar(20) NOT NULL COMMENT '股票名称',
+  `stock_date` date NOT NULL COMMENT '交易所行情日期',
+  `trading_volume` decimal(20,4) comment '成交量（累计 单位：股）',
+  `obv` decimal(20,4) DEFAULT NULL COMMENT '平衡交易量',
+  `30ma_obv` decimal(20,4) DEFAULT NULL COMMENT '30日平衡交易量',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `index_stock_date_price` (`stock_code`,`stock_date`) USING BTREE,
+  KEY `index_stock_name` (`stock_name`) USING BTREE,
+  KEY `index_stock_date` (`stock_date`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='计算股票每月的平衡交易量';
