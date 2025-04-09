@@ -4,7 +4,7 @@ import pandas as pd
 
 from stock_util.stock_indicator_util import calculate_stock_ma, calculate_stock_month_price, calculate_stock_macd, \
     calculate_stock_week_price, calculate_stock_cci, calculate_stock_rsi, \
-    calculate_stock_boll
+    calculate_stock_boll, calculate_stock_obv
 from util.time_util import get_last_some_time, random_pause
 
 
@@ -102,4 +102,8 @@ if __name__ == '__main__':
     calculate_stock_cci('d')
     calculate_stock_cci('w')
     calculate_stock_cci('m')
+    calculate_stock_obv('d')
+    calculate_stock_obv('w')
+    calculate_stock_obv('m')
+
 

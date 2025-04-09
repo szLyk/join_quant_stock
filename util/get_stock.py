@@ -1,3 +1,5 @@
+import datetime
+
 import baostock as bs
 import pandas as pd
 import numpy as np
@@ -237,7 +239,7 @@ def update_all_stock_today_price(frequency):
             if flag:
                 insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', today)
                 my.execute_query(engine, insert_sql)
-                remove_redis_update_stock_code(frequency, i[0])
+                remove_redis_update_stock_code(update_column, i[0])
             tu.random_pause(1)
         elif frequency == 'w':
             df = get_some_stock_data(i[0], today, today, "w")
@@ -245,7 +247,7 @@ def update_all_stock_today_price(frequency):
             if flag:
                 insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', today)
                 my.execute_query(engine, insert_sql)
-                remove_redis_update_stock_code(frequency, i[0])
+                remove_redis_update_stock_code(update_column, i[0])
             tu.random_pause(1)
         elif frequency == 'm':
             df = get_some_stock_data(i[0], today, today, "m")
@@ -253,7 +255,7 @@ def update_all_stock_today_price(frequency):
             if flag:
                 insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', today)
                 my.execute_query(engine, insert_sql)
-                remove_redis_update_stock_code(frequency, i[0])
+                remove_redis_update_stock_code(update_column, i[0])
             tu.random_pause(1)
 
 
@@ -344,66 +346,74 @@ def get_stock_price_record_and_macd(stock_code, frequency):
     return pd.DataFrame(result)
 
 
-def init_stock_profit_data(profit_year):
+def init_stock_profit_data():
     engine = my.get_mysql_connection()
-    stock_list = get_stock_list_for_update_df()['stock_code']
-    update_columns = ['stock_code', 'performance_year', 'performance_season', 'performance_update_date',
-                      'performance_type']
-    profit_columns = ['code', 'pubDate', 'statDate', 'roeAvg', 'npMargin', 'gpMargin', 'netProfit', 'epsTTM',
-                      'MBRevenue', 'totalShare', 'liqaShare', 'season']
-    for stock_code in stock_list:
-        # 登陆系统
-        # 初始化空列表用于存储所有利润数据
+    record_table = 'stock_performance_update_record'
+    redis_key = 'profit_update_date'
+    stock_list = get_redis_stock_list(redis_key)
+    if len(stock_list) == 0:
+        stock_list = get_stock_list_for_update_df()[['stock_code', 'stock_name']]
+        stock_list = stock_list['stock_code'] + ':' + stock_list['stock_name']
+        set_redis_stock_list(redis_key, stock_list)
+    stock_list = split_stock_name(stock_list)
+    for i in range(0, len(stock_list)):
+        stock_code = stock_list['stock_code'].iloc[i]
+        stock_name = stock_list['stock_name'].iloc[i]
+        print(f'开始更新<{stock_code}:{stock_name}>季频盈利能力数据')
+        now_year = datetime.datetime.now().year
         profit_list = []
-        update_list = []
-        # 查询季频估值指标盈利能力
-        for j in range(2007, profit_year + 1):
-            season = []
-            for i in range(1, 5):
-                get_login()
-                rs_profit = bs.query_profit_data(code=stock_code, year=j, quarter=i)
+        for pro_year in range(2007, now_year):
+            # 查询季频估值指标盈利能力
+            for i in range(1, 5):  # 遍历四个季度
+                # 登陆系统
+                lg = get_login()
+                rs_profit = bs.query_profit_data(code=stock_code, year=pro_year, quarter=i)
+                temp_list = []  # 存储当前季度的数据行
                 while (rs_profit.error_code == '0') & rs_profit.next():
-                    rs = rs_profit.get_row_data()
-                    if len(rs) > 0:
-                        # 将季度数添加到当前行数据的末尾
-                        rs.append(str(i))  # 注意这里直接修改 rs 列表
-                        profit_list.append(rs)
-                        season.append(str(i))
+                    row_data = rs_profit.get_row_data()  # 获取当前行数据
+                    row_data.append(i)  # 添加季度信息（i 表示当前季度）
+                    temp_list.append(row_data)  # 将修改后的行数据添加到 temp_list
+                # 登出系统
                 get_login_out()
                 tu.random_pause(1)
-            if len(season) > 0:
-                update_record = [stock_code, profit_year, ','.join(season), tu.get_last_some_time(0), 1]
-                update_list.append(update_record)
-            tu.random_pause(2)
-        # 将所有利润数据转换为 DataFrame
-        if profit_list:  # 确保有数据时才创建 DataFrame
-            result_profit = pd.DataFrame(profit_list, columns=profit_columns)
-            # 初始化 df 为空 DataFrame 或者直接使用 result_profit
-            df = pd.DataFrame(columns=result_profit.columns) if result_profit.empty else result_profit
-            df = df.rename(columns={
-                'code': 'stock_code',
-                'pubDate': 'publish_date',
-                'statDate': 'statistic_date',
-                'roeAvg': 'roe_avg',
-                'npMargin': 'np_margin',
-                'gpMargin': 'gp_margin',
-                'netProfit': 'net_profit',
-                'epsTTM': 'eps_ttm',
-                'MBRevenue': 'mb_revenue',
-                'totalShare': 'total_share',
-                'liqaShare': 'liqa_share',
-                'season': 'season'
-            }).replace(r'^\s*$', None, regex=True)
-            my.batch_insert_or_update(engine, df, 'stock_profit_data', 'stock_code')
-        else:
-            print("No data found.")
-
-            # 登出系统
-        if len(update_list) > 0:
-            rf = pd.DataFrame(update_list, columns=update_columns)  # 注意这里需要将 update_record 包装成一个列表
-            my.insert_or_update(engine, rf, 'stock_performance_update_record', 'stock_code', 'performance_year',
-                                'performance_type')
-            print(f'<{stock_code}> 已更新')
+                # 将当前季度的数据转换为 DataFrame，并添加到 profit_list
+                # 注意：需要在字段列表中新增 "quarter" 列
+                result_df = pd.DataFrame(temp_list, columns=rs_profit.fields + ["season"])
+                result_df = result_df.rename(columns={
+                    'code': 'stock_code',
+                    'pubDate': 'publish_date',
+                    'statDate': 'statistic_date',
+                    'roeAvg': 'roe_avg',
+                    'npMargin': 'np_margin',
+                    'gpMargin': 'gp_margin',
+                    'netProfit': 'net_profit',
+                    'epsTTM': 'eps_ttm',
+                    'MBRevenue': 'mb_revenue',
+                    'totalShare': 'total_share',
+                    'liqaShare': 'liqa_share',
+                    'season': 'season'
+                }).replace(r'^\s*$', None, regex=True)
+                profit_list.append(result_df)
+        if len(profit_list) > 0:
+            # 使用 pd.concat() 拼接所有季度的 DataFrame
+            result_profit = pd.concat(profit_list, axis=0, ignore_index=True)
+            if len(result_profit) > 0:
+                cnt = my.batch_insert_or_update(engine, result_profit, 'stock_profit_data', 'stock_code',
+                                                'statistic_date')
+                if cnt > 0:
+                    result_profit['performance_year'] = pd.to_datetime(result_profit['statistic_date'],
+                                                                       format='%Y-%m-%d').dt.year
+                    # 按 "group" 分组，并对 "value" 列去重合并
+                    record_result = result_profit.groupby(["performance_year", "stock_code"])["season"].agg(
+                        lambda x: "|".join(map(str, pd.Series.unique(x)))
+                    ).reset_index(name="performance_season")
+                    record_result['performance_type'] = 1
+                    record_result['performance_update_date'] = tu.get_last_some_time(0)
+                    my.batch_insert_or_update(engine, record_result, record_table, 'stock_code',
+                                              'performance_year', 'performance_type')
+                    remove_redis_update_stock_code(redis_key, f'{stock_code}:{stock_name}')
+                    print(f'更新<{stock_code}:{stock_name}>季频盈利能力数据完成!')
+        tu.random_pause(1)
 
 
 def set_redis_update_stock_list(key, df):
@@ -477,9 +487,10 @@ if __name__ == '__main__':
     # update_all_stock_history_date_week_month_price("d")
     # update_all_stock_history_date_week_month_price("m")
     # update_all_stock_history_date_week_month_price("m`")
-    update_all_stock_today_price('d')
+    # update_all_stock_today_price('d')
 
     # init_stock_date_week_month()
     # print(get_some_stock_data("sz.003008", "2025-03-19", "2025-03-19", "d"))
     # print(get_redis_update_stock_list('d', ''))
     # print(remove_redis_update_stock_code('d', 'sh.600000'))
+    init_stock_profit_data()

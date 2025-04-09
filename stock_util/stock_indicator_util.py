@@ -873,13 +873,14 @@ def calculate_stock_rsi(frequency, batch_size=10):
             close_prices = group['close_price'].values.astype(float)
             max_date = group['stock_date'].max()
             # 批量计算所有窗口RSI
+            stock_code = group['stock_code'].iloc(0)
             rsis = compute_all_rsi(close_prices, windows=[6, 12, 24])
             # 将结果添加到DataFrame
             for window in [6, 12, 24]:
                 group[f'rsi_{window}'] = rsis[f'rsi_{window}']
 
             result_dfs.append(group)
-            max_dates.append([stock, max_date])
+            max_dates.append([stock_code, max_date])
 
         final_df = pd.concat(result_dfs)
         final_df = final_df[final_df['rsi_6'].notna()]
@@ -1040,8 +1041,8 @@ if __name__ == '__main__':
     # else:
     #     print("未检测到符合条件的底背离信号")
     # calculate_stock_macd('d')
-    calculate_stock_macd('w')
-    calculate_stock_macd('m')
+    # calculate_stock_macd('w')
+    # calculate_stock_macd('m')
 
     # calculate_stock_obv('d')
     # calculate_stock_obv('w')
@@ -1049,3 +1050,4 @@ if __name__ == '__main__':
     # calculate_stock_boll('w')
     # calculate_stock_cci('m')
     # calculate_stock_cci('w')
+    calculate_stock_rsi('d')
