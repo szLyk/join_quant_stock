@@ -342,8 +342,8 @@ class RedisUtil:
         :param max: 最大分数值
         :return: 列表 [member, member ...]
         """
-        results = self.rdb.zrangebyscore(key, min, max)
-        return [member.decode('utf-8') for member in results]
+        results = self.rdb.zrangebyscore(key, min, max, withscores=with_score)
+        return [(member[0].decode('utf-8'),member[1]) for member in results]
 
     def delete_sortSet_by_member(self, key, *members):
         """

@@ -189,7 +189,7 @@ def get_stock_list_for_update_sql(update_date_column=None):
         select_sql = f'''
         select b.stock_code, b.stock_name, IFNULL(a.{update_date_column}, '1990-01-01') {update_date_column}
         from (SELECT stock_code, stock_name from stock.stock_basic where stock_type = 1 and stock_status = 1) b
-             left join (SELECT stock_name,stock_code,{update_date_column} from stock.update_stock_record) a
+              left join (SELECT stock_name,stock_code,{update_date_column} from stock.update_stock_record) a
                        on a.stock_code = b.stock_code;
         '''
     else:
@@ -214,6 +214,8 @@ def get_stock_code(stock_code_df):
 
 # 更新当天数据
 def update_all_stock_today_price(frequency):
+    get_stock_basic()
+    init_update_stock_record()
     update_column = 'update_stock_date'
     if frequency == 'w':
         update_column = 'update_stock_week'
@@ -270,7 +272,7 @@ def update_all_stock_history_date_week_month_price(frequency):
     select_table, update_column = freq_config[frequency[0]]
     last_day = tu.get_last_some_time(1)
     # 先出Redis
-    result_df = get_redis_update_stock_list(frequency)
+    result_df = get_redis_update_stock_list(update_column)
     if len(result_df) == 0:
         result_df = get_stock_list_for_update_df(update_column)[['stock_code', f'{update_column}']]
         set_redis_update_stock_list(update_column, result_df)
@@ -280,32 +282,34 @@ def update_all_stock_history_date_week_month_price(frequency):
     select stock_code,stock_name from stock_basic where stock_code in ({st_list})
     '''
     df = pd.DataFrame(my.execute_read_query(engine, sql))
+    status_dict = result_df.set_index('stock_code').to_dict('index')
     for i in df.values:
-        if i[2] <= last_day:
+        update_time = status_dict.get(i[0], {})['update_time']
+        if update_time <= last_day:
             print(f'获取<{i[1]}>股票的数据....')
             if frequency == 'd':
-                df = get_some_stock_data(i[0], i[2], last_day, "d")
+                df = get_some_stock_data(i[0], update_time, last_day, "d")
                 flag = insert_batch_into_stock_price_record(frequency, df)
                 if flag:
                     insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', last_day)
                     my.execute_query(engine, insert_sql)
-                    remove_redis_update_stock_code(frequency, i[0])
+                    remove_redis_update_stock_code(update_column, i[0])
                 tu.random_pause(2)
             elif frequency == 'w':
-                df = get_some_stock_data(i[0], i[2], last_day, "w")
+                df = get_some_stock_data(i[0], update_time, last_day, "w")
                 flag = insert_batch_into_stock_price_record(frequency, df)
                 if flag:
                     insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', last_day)
                     my.execute_query(engine, insert_sql)
-                    remove_redis_update_stock_code(frequency, i[0])
+                    remove_redis_update_stock_code(update_column, i[0])
                 tu.random_pause(2)
             elif frequency == 'm':
-                df = get_some_stock_data(i[0], i[2], last_day, "m")
+                df = get_some_stock_data(i[0], update_time, last_day, "m")
                 flag = insert_batch_into_stock_price_record(frequency, df)
                 if flag:
                     insert_sql = update_table_update_stock_record(i[1], i[0], f'{update_column}', last_day)
                     my.execute_query(engine, insert_sql)
-                    remove_redis_update_stock_code(frequency, i[0])
+                    remove_redis_update_stock_code(update_column, i[0])
                 tu.random_pause(2)
         else:
             print(f'<{i[1]}>股票数据已更新...最新数据：{i[2]}')
@@ -351,6 +355,8 @@ def init_stock_profit_data():
     record_table = 'stock_performance_update_record'
     redis_key = 'profit_update_date'
     stock_list = get_redis_stock_list(redis_key)
+    if len(stock_list) > 0:
+        stock_list = [x[0] for x in stock_list]
     if len(stock_list) == 0:
         stock_list = get_stock_list_for_update_df()[['stock_code', 'stock_name']]
         stock_list = stock_list['stock_code'] + ':' + stock_list['stock_name']
@@ -436,7 +442,9 @@ def get_redis_update_stock_list(key):
     rs = RedisUtil()
     today = tu.get_last_some_time(0)
     result = rs.get_sortSet_by_scoreRange(f'{today}_{key}', 0, '+inf')
-    return pd.DataFrame(result, columns=['stock_code'])
+    df = pd.DataFrame(result, columns=['stock_code', 'update_time'])
+    df['update_time'] = df['update_time'].apply(lambda x: tu.turn_timestamp_to_date(x, 'd'))
+    return df
 
 
 def get_redis_stock_list(key):
@@ -494,3 +502,4 @@ if __name__ == '__main__':
     # print(get_redis_update_stock_list('d', ''))
     # print(remove_redis_update_stock_code('d', 'sh.600000'))
     init_stock_profit_data()
+    # update_all_stock_history_date_week_month_price('d')

@@ -155,9 +155,9 @@ def calculate_stock_macd(frequency):
 
     # 频率配置字典
     freq_config = {
-        'd': ('stock_history_date_price', 'date_stock_macd', 'update_stock_date_macd', 15,'日'),
-        'w': ('stock_history_week_price', 'week_stock_macd', 'update_stock_week_macd', 100,'周'),
-        'm': ('stock_history_month_price', 'month_stock_macd', 'update_stock_month_macd', 800,'月')
+        'd': ('stock_history_date_price', 'date_stock_macd', 'update_stock_date_macd', 15, '日'),
+        'w': ('stock_history_week_price', 'week_stock_macd', 'update_stock_week_macd', 100, '周'),
+        'm': ('stock_history_month_price', 'month_stock_macd', 'update_stock_month_macd', 800, '月')
     }
     select_table, insert_table, update_col, days, fre = freq_config[frequency[0]]
     record_table = 'update_stock_record'
@@ -684,6 +684,8 @@ def calculate_stock_cci(frequency, batch_size=10):
     stock_table, moving_table, insert_table, update_col, trade_status = freq_config[frequency[0]]
     update_table = 'update_stock_record'
     stock_list = gs.get_redis_stock_list(update_col)
+    if len(stock_list) > 0:
+        stock_list = [x[0] for x in stock_list]
     if len(stock_list) == 0:
         stock_list = gs.get_stock_list_for_update_df()[['stock_code', 'stock_name']]
         stock_list = stock_list['stock_code'] + ':' + stock_list['stock_name']
@@ -837,6 +839,8 @@ def calculate_stock_rsi(frequency, batch_size=10):
     engine = my.get_mysql_connection()
     record_table = 'update_stock_record'
     stock_list = gs.get_redis_stock_list(update_col)
+    if len(stock_list) > 0:
+        stock_list = [x[0] for x in stock_list]
     if len(stock_list) == 0:
         stock_list = gs.get_stock_list_for_update_df()[['stock_code', 'stock_name']]
         stock_list = stock_list['stock_code'] + ':' + stock_list['stock_name']
@@ -881,7 +885,8 @@ def calculate_stock_rsi(frequency, batch_size=10):
 
             result_dfs.append(group)
             max_dates.append([stock_code, max_date])
-
+        if len(result_dfs) == 0:
+            continue
         final_df = pd.concat(result_dfs)
         final_df = final_df[final_df['rsi_6'].notna()]
 
@@ -917,6 +922,8 @@ def calculate_stock_obv(frequency, batch_size=10, window=30):
     engine = my.get_mysql_connection()
     record_table = 'update_stock_record'
     stock_list = gs.get_redis_stock_list(update_col)
+    if len(stock_list) > 0:
+        stock_list = [x[0] for x in stock_list]
     if len(stock_list) == 0:
         stock_list = gs.get_stock_list_for_update_df()[['stock_code', 'stock_name']]
         stock_list = stock_list['stock_code'] + ':' + stock_list['stock_name']

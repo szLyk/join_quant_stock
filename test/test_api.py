@@ -102,8 +102,8 @@ if __name__ == '__main__':
     calculate_stock_cci('d')
     calculate_stock_cci('w')
     calculate_stock_cci('m')
-    calculate_stock_obv('d')
-    calculate_stock_obv('w')
-    calculate_stock_obv('m')
+    # calculate_stock_obv('d')
+    # calculate_stock_obv('w')
+    # calculate_stock_obv('m')
 
 
