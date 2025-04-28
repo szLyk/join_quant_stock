@@ -951,6 +951,8 @@ def calculate_stock_obv(frequency, batch_size=10, window=30):
             ON a.stock_code = b.stock_code
         '''
         df = pd.DataFrame(my.execute_read_query(engine, sql))
+        if len(df) == 0:
+            continue
         # 类型转换
         df[['open_price', 'close_price', 'trading_volume']] = df[
             ['open_price', 'close_price', 'trading_volume']].astype(
