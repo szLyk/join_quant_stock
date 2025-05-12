@@ -187,7 +187,7 @@ def calculate_stock_macd(frequency):
             row_number() over (partition by a.stock_code order by a.stock_date) rn       
         from
         (SELECT stock_code, stock_date, ema_12, ema_26, dea, diff, macd
-                FROM stock.week_stock_macd) a
+                FROM stock.{insert_table}) a
         join (SELECT stock_code, update_stock_date_macd
                     FROM stock.update_stock_record
                     WHERE stock_code IN ({code_str})) b
@@ -557,6 +557,8 @@ def calculate_stock_boll(frequency, batch_size=10):
     stock_table, moving_table, insert_table, update_col, trade_status = freq_config[frequency[0]]
     update_table = 'update_stock_record'
     update_df = gs.get_redis_stock_list(update_col)
+    if len(update_df) > 0:
+        update_df = [x[0] for x in update_df]
     if len(update_df) == 0:
         update_df = gs.get_stock_list_for_update_df()[['stock_code', 'stock_name']]
         update_df = update_df['stock_code'] + ':' + update_df['stock_name']
