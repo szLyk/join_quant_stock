@@ -284,7 +284,7 @@ def update_all_stock_history_date_week_month_price(frequency):
     df = pd.DataFrame(my.execute_read_query(engine, sql))
     status_dict = result_df.set_index('stock_code').to_dict('index')
     for i in df.values:
-        update_time = status_dict.get(i[0], {})['update_time']
+        update_time = status_dict.get(i[0], {})[f'{update_column}']
         if update_time <= last_day:
             print(f'获取<{i[1]}>股票的数据....')
             if frequency == 'd':
@@ -442,8 +442,8 @@ def get_redis_update_stock_list(key):
     rs = RedisUtil()
     today = tu.get_last_some_time(0)
     result = rs.get_sortSet_by_scoreRange(f'{today}_{key}', 0, '+inf')
-    df = pd.DataFrame(result, columns=['stock_code', 'update_time'])
-    df['update_time'] = df['update_time'].apply(lambda x: tu.turn_timestamp_to_date(x, 'd'))
+    df = pd.DataFrame(result, columns=['stock_code', f'{key}'])
+    df['update_time'] = df[f'{key}'].apply(lambda x: tu.turn_timestamp_to_date(x, 'd'))
     return df
 
 
